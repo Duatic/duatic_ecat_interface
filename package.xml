@@ -3,7 +3,7 @@
 <package format="3">
   <name>duatic_ecat_interface</name>
   <version>1.0.0</version>
-  <description>An interface wrapper around ethercat master implementations</description>
+  <description>An interface wrapper around EtherCAT® master implementations</description>
   <maintainer email="lnachtigall@duatic.com">Lennart Nachtigall</maintainer>
   <license>BSD-3-Clause</license>
 
