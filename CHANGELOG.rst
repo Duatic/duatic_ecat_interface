@@ -1,29 +1,32 @@
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Changelog for package duatic_ecat_interface
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 2.0.0 (2026-11-04)
 ------------------
 * refactor!: rename the package to duatic_ecat_interface (#24)
-* feat(executor): added is_spinning method to the bus executor (#20)
+* feat(executor): add is_spinning to the bus executor (#20)
+* feat(diagnostics): report the device topology read from SOEM (#17)
+* feat(diagnostics): extend the bus diagnostics (#18)
+* feat(nic): add nic::is_up, telling whether the selected interface is connected (#16)
+* feat(bus_scanner): add an --sdo option that reads and prints SDOs
+* feat: add reset_hooks to deregister a device's callbacks
+* feat: give the EtherCAT bus its own logger
+* feat: log failed device state changes
+* feat: double the default PDO buffer size to 8192 bytes
 * fix: resolve gcc compile errors on humble (#23)
-* fix(pre-commit): use mirrors-clang-format instead of system binary (#13)
-* double default pdo buffer size
-* Feature/extend diagnostics (#18)
-* fix some loop inconsitency
-* Feature/report device topology (#17)
-* Added nic::is_up functionality to determine if the selected interface is connected (#16)
-* run pre-commit
-* fix sdo readout option in the bus scanner
-* added --sdo option to bus_scanner tool - allows to actually read and print sdos
-* fix minor issue with the foe read used sizes
-* fix dead on_post_shutdown callbacks
-* added reset_hooks function
-* fix the device owner ship model  (#15)
-* make EthercatDeviceBase non copyable and non movable
-* String SDO reads need to check for zero terminators (#14)
-* gave the ethercat-bus its own logger
-* add a few logging statements in the change_device_state method
-* added changelog
-* Several small consistency fixes
-* added suggested clang format fix
-* added gitignore file
-* fix typo in file name
-* disable flacky test
-* fix license identifier
+* fix: rework the device ownership model, dropping the previously virtual functions (#15)
+* fix: check string SDO reads for a zero terminator (#14)
+* fix(diagnostics): remove a locking issue in the diagnostics (#18)
+* fix(bus_scanner): read SDOs correctly with --sdo
+* fix: clamp FoE reads to the size of the buffer
+* fix: clear the devices only after the on_post_shutdown callbacks ran
+* fix: iterate over the devices with an unsigned index
+* fix: rename priorty_inheriting_mutex.hpp to priority_inheriting_mutex.hpp
+* fix: use the SPDX license identifier BSD-3-Clause
+* refactor: make EthercatDeviceBase neither copyable nor movable
+* refactor: make EthercatBus final, and have SingleBusExecutor take its bus by value
+
+1.0.0 (2026-08-20)
+------------------
+* First public release
