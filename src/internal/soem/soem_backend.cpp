@@ -22,7 +22,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "duatic_ethercat_interface/ethercat_bus.hpp"
+#include "duatic_ecat_interface/ethercat_bus.hpp"
 
 #include <mutex>     // NOLINT(build/include_order)
 #include <thread>    // NOLINT(build/include_order)
@@ -31,21 +31,21 @@
 
 #include <duatic_message_logger/log.hpp>
 
-#include "duatic_ethercat_interface/exceptions.hpp"
-#include "duatic_ethercat_interface/ethercat_device.hpp"
-#include "duatic_ethercat_interface/distributed_clock_sync.hpp"
+#include "duatic_ecat_interface/exceptions.hpp"
+#include "duatic_ecat_interface/ethercat_device.hpp"
+#include "duatic_ecat_interface/distributed_clock_sync.hpp"
 
-#include "duatic_ethercat_interface/object_dictionary.hpp"
-#include "duatic_ethercat_interface/priority_inheriting_mutex.hpp"
+#include "duatic_ecat_interface/object_dictionary.hpp"
+#include "duatic_ecat_interface/priority_inheriting_mutex.hpp"
 
-#include "duatic_ethercat_interface/internal/backend_impl.hpp"
-#include "duatic_ethercat_interface/internal/soem/soem_context.hpp"
-#include "duatic_ethercat_interface/internal/soem/bus_state.hpp"
-#include "duatic_ethercat_interface/internal/soem/mailbox.hpp"
-#include "duatic_ethercat_interface/internal/nic.hpp"
+#include "duatic_ecat_interface/internal/backend_impl.hpp"
+#include "duatic_ecat_interface/internal/soem/soem_context.hpp"
+#include "duatic_ecat_interface/internal/soem/bus_state.hpp"
+#include "duatic_ecat_interface/internal/soem/mailbox.hpp"
+#include "duatic_ecat_interface/internal/nic.hpp"
 
 // Implementation of the EthercatBus for the SOEM library
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 
 using namespace internal::soem;  // NOLINT(build/namespaces)
@@ -1492,4 +1492,4 @@ void EthercatBus::dispatch_device_update_read(EthercatDevice& device, const High
   device.update_read(tp);
 }
 
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface

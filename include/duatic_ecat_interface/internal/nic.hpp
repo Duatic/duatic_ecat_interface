@@ -24,19 +24,26 @@
 
 #pragma once
 
-namespace duatic::ethercat_interface::internal
+#include <string>
+
+namespace duatic::ecat_interface::nic
 {
 /**
- * @brief INTERNAL interface representation for a backend implementation
- * @note this is an internal header and shall not be installed
+ * @brief Check whether a network interface is administratively up.
  *
- * This interface class describes the abstract base interface for a specific backend implementation
+ * Queries the interface flags via the SIOCGIFFLAGS ioctl and tests for
+ * IFF_UP. This corresponds to the "UP" flag shown by `ip link show`, i.e.
+ * the interface is enabled by configuration. It does not indicate whether
+ * a carrier is present (no cable, no link partner) or whether an address
+ * has been assigned.
+ *
+ * @param interface_name Name of the interface, e.g. "eth0". Must be
+ *                       non-empty and shorter than IFNAMSIZ.
+ *
+ * @return true if the interface exists and has IFF_UP set,
+ *         false otherwise — including when the name is invalid, the
+ *         interface does not exist, or the socket/ioctl call fails.
  */
-class BackendImplInterface
-{
-public:
-  virtual int initialize() = 0;
-  virtual int get_device_count() const;
-  virtual ~BackendImplInterface() = default;
-};
-}  // namespace duatic::ethercat_interface::internal
+bool is_up(const std::string interface_name);
+
+}  // namespace duatic::ecat_interface::nic

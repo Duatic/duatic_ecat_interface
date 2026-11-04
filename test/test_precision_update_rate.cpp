@@ -26,10 +26,10 @@
 #include <thread>
 #include <chrono>
 #include <ctime>
-#include "duatic_ethercat_interface/precision_update_rate.hpp"
+#include "duatic_ecat_interface/precision_update_rate.hpp"
 
 using namespace std::chrono_literals;        // NOLINT(build/namespaces)
-using namespace duatic::ethercat_interface;  // NOLINT(build/namespaces)
+using namespace duatic::ecat_interface;  // NOLINT(build/namespaces)
 
 class PrecisionUpdateRateTest : public ::testing::Test
 {

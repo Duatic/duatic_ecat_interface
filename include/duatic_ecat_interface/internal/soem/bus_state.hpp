@@ -28,7 +28,7 @@
 
 #include <cstdint>
 
-namespace duatic::ethercat_interface::internal::soem
+namespace duatic::ecat_interface::internal::soem
 {
 
 enum class BusState
@@ -107,4 +107,4 @@ static constexpr EthercatDeviceState map_from_soem_device_state(const ec_state s
       return EthercatDeviceState::None;
   }
 }
-}  // namespace duatic::ethercat_interface::internal::soem
+}  // namespace duatic::ecat_interface::internal::soem

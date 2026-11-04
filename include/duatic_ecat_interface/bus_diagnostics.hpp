@@ -29,9 +29,9 @@
 #include <vector>
 #include <ostream>
 
-#include "duatic_ethercat_interface/types.hpp"
+#include "duatic_ecat_interface/types.hpp"
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 
 enum class DiagnosticsLevel
@@ -271,4 +271,4 @@ struct DiagnosticsSnapshot
 std::string to_string(const DiagnosticsSnapshot& snap);
 std::ostream& operator<<(std::ostream& os, const DiagnosticsSnapshot& snap);
 
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface

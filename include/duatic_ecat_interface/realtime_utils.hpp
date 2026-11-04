@@ -31,7 +31,7 @@
 
 #include <duatic_message_logger/log.hpp>
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 /**
  * @brief set_realtime_priority - try to configure the passed thread to have higher priorities and behave more rt
@@ -152,4 +152,4 @@ inline bool restore_signal_mask(const sigset_t& mask)
   }
   return true;
 }
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface

@@ -30,9 +30,9 @@
 #include <string>       // NOLINT(build/include_order)
 #include <type_traits>  // NOLINT(build/include_order)
 
-#include "duatic_ethercat_interface/ethercat_bus.hpp"
+#include "duatic_ecat_interface/ethercat_bus.hpp"
 
-namespace duatic::ethercat_interface::internal
+namespace duatic::ecat_interface::internal
 {
 
 // Shortest round-trip representation, same output as std::format("{}") (which GCC 11 / Humble lacks)
@@ -151,4 +151,4 @@ inline std::string sdo_print_helper(EthercatBus& bus, const DeviceId device_id, 
     return "error: " + std::string(ex.what());
   }
 }
-}  // namespace duatic::ethercat_interface::internal
+}  // namespace duatic::ecat_interface::internal

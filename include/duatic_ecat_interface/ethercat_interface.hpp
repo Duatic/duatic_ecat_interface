@@ -24,26 +24,8 @@
 
 #pragma once
 
-#include <string>
-
-namespace duatic::ethercat_interface::nic
-{
-/**
- * @brief Check whether a network interface is administratively up.
- *
- * Queries the interface flags via the SIOCGIFFLAGS ioctl and tests for
- * IFF_UP. This corresponds to the "UP" flag shown by `ip link show`, i.e.
- * the interface is enabled by configuration. It does not indicate whether
- * a carrier is present (no cable, no link partner) or whether an address
- * has been assigned.
- *
- * @param interface_name Name of the interface, e.g. "eth0". Must be
- *                       non-empty and shorter than IFNAMSIZ.
- *
- * @return true if the interface exists and has IFF_UP set,
- *         false otherwise — including when the name is invalid, the
- *         interface does not exist, or the socket/ioctl call fails.
- */
-bool is_up(const std::string interface_name);
-
-}  // namespace duatic::ethercat_interface::nic
+// This is a convenience header
+// Please use this header instead of directly including any of the other files directly
+#include "duatic_ecat_interface/ethercat_bus.hpp"
+#include "duatic_ecat_interface/ethercat_device.hpp"
+#include "duatic_ecat_interface/executor.hpp"

@@ -21,13 +21,13 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include "duatic_ethercat_interface/bus_diagnostics.hpp"
+#include "duatic_ecat_interface/bus_diagnostics.hpp"
 
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 namespace
 {
@@ -135,4 +135,4 @@ std::ostream& operator<<(std::ostream& os, const DiagnosticsSnapshot& snap)
 {
   return os << to_string(snap);
 }
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface

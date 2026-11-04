@@ -29,9 +29,9 @@
 #include <unordered_map>
 #include <utility>
 
-#include "duatic_ethercat_interface/types.hpp"
+#include "duatic_ecat_interface/types.hpp"
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 struct SDOSubEntry
 {
@@ -207,4 +207,4 @@ private:
   std::unordered_map<std::string, const SDOEntry*> sdo_entries_by_name_;
 };
 
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface

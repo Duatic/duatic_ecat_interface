@@ -22,10 +22,10 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #pragma once
-#include "duatic_ethercat_interface/internal/soem/soem_context.hpp"
-#include "duatic_ethercat_interface/types.hpp"
+#include "duatic_ecat_interface/internal/soem/soem_context.hpp"
+#include "duatic_ecat_interface/types.hpp"
 
-namespace duatic::ethercat_interface::internal::soem
+namespace duatic::ecat_interface::internal::soem
 {
 /// Describes the mailbox access currently in flight, so events popped from
 /// SOEM's error list can be attributed to it. Internal to the SOEM backend.
@@ -181,4 +181,4 @@ static MailboxEvent make_foe_event(const DeviceId device_id, const int wkc)
   }
   return ev;
 }
-}  // namespace duatic::ethercat_interface::internal::soem
+}  // namespace duatic::ecat_interface::internal::soem

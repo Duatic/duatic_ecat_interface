@@ -26,7 +26,7 @@
 #include <chrono>
 #include <cstdint>
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 
 class DCSyncController
@@ -81,4 +81,4 @@ private:
   double integral_ = 0.0;  // double, not float — avoids long-run precision loss
   std::chrono::nanoseconds last_time_error_{ 0 };
 };
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface

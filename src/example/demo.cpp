@@ -22,13 +22,13 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "duatic_ethercat_interface/ethercat_interface.hpp"
+#include "duatic_ecat_interface/ethercat_interface.hpp"
 
 /**
  * This is a minimal example which demonstrates how to use the api
  */
 
-using namespace duatic::ethercat_interface;  // NOLINT(build/namespaces)
+using namespace duatic::ecat_interface;  // NOLINT(build/namespaces)
 
 struct RX
 {

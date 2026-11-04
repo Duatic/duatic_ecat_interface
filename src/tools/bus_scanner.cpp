@@ -28,10 +28,10 @@
 #include <thread>
 #include <cxxopts.hpp>
 
-#include <duatic_ethercat_interface/ethercat_bus.hpp>
-#include <duatic_ethercat_interface/internal/tools/sdo_print_helper.hpp>
+#include <duatic_ecat_interface/ethercat_bus.hpp>
+#include <duatic_ecat_interface/internal/tools/sdo_print_helper.hpp>
 
-using namespace duatic::ethercat_interface;  // NOLINT(build/namespaces)
+using namespace duatic::ecat_interface;  // NOLINT(build/namespaces)
 
 void handle_list_interfaces()
 {

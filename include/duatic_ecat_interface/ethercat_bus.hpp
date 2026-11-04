@@ -32,12 +32,12 @@
 
 #include <duatic_message_logger/log.hpp>
 
-#include "duatic_ethercat_interface/object_dictionary.hpp"
-#include "duatic_ethercat_interface/types.hpp"
-#include "duatic_ethercat_interface/bus_diagnostics.hpp"
-#include "duatic_ethercat_interface/backend.hpp"
+#include "duatic_ecat_interface/object_dictionary.hpp"
+#include "duatic_ecat_interface/types.hpp"
+#include "duatic_ecat_interface/bus_diagnostics.hpp"
+#include "duatic_ecat_interface/backend.hpp"
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 // Forward declaration of the device class
 class EthercatDevice;
@@ -348,4 +348,4 @@ template <>
 SDOWriteResult EthercatBus::sdo_write<std::string>(DeviceId device_id, const std::string data, SDOIndex index,
                                                    SDOSubIndex sub_index);
 
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface

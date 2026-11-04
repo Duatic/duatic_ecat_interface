@@ -30,7 +30,7 @@
 #include <type_traits>
 #include <algorithm>
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 
 /**
@@ -167,4 +167,4 @@ private:
   std::optional<T> value_{};
 };
 
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface

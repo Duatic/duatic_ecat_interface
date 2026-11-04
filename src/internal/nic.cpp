@@ -29,7 +29,7 @@
 #include <cstring>
 #include <string>
 
-namespace duatic::ethercat_interface::nic
+namespace duatic::ecat_interface::nic
 {
 
 bool is_up(const std::string interface_name)
@@ -51,4 +51,4 @@ bool is_up(const std::string interface_name)
   ::close(fd);
   return up;
 }
-}  // namespace duatic::ethercat_interface::nic
+}  // namespace duatic::ecat_interface::nic

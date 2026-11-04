@@ -30,7 +30,7 @@
 #include <cerrno>
 #include <system_error>
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 
 /**
@@ -110,4 +110,4 @@ private:
   pthread_mutex_t mutex_{};
 };
 
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface

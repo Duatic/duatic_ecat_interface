@@ -28,13 +28,13 @@
 #include <memory>
 #include <condition_variable>
 
-#include "duatic_ethercat_interface/precision_update_rate.hpp"
-#include "duatic_ethercat_interface/exceptions.hpp"
-#include "duatic_ethercat_interface/realtime_utils.hpp"
-#include "duatic_ethercat_interface/ethercat_bus.hpp"
-#include "duatic_ethercat_interface/bus_diagnostics.hpp"
+#include "duatic_ecat_interface/precision_update_rate.hpp"
+#include "duatic_ecat_interface/exceptions.hpp"
+#include "duatic_ecat_interface/realtime_utils.hpp"
+#include "duatic_ecat_interface/ethercat_bus.hpp"
+#include "duatic_ecat_interface/bus_diagnostics.hpp"
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 
 struct ExecutorParameters
@@ -264,4 +264,4 @@ private:
         0.5 * duration_cast<duration<double>>(diag.last_update_duration).count() + 0.5 * diag.average_update_duration;
   }
 };
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface

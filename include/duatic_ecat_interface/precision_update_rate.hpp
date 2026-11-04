@@ -28,7 +28,7 @@
 #include <cstdint>
 #include <chrono>
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 
 namespace precision_timing
@@ -218,4 +218,4 @@ private:
   timespec sleep_end_;
 };
 
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface

@@ -30,13 +30,13 @@
 #include <vector>
 #include <string>
 
-#include "duatic_ethercat_interface/types.hpp"
-#include "duatic_ethercat_interface/exceptions.hpp"
-#include "duatic_ethercat_interface/object_dictionary.hpp"
-#include "duatic_ethercat_interface/ethercat_bus.hpp"
-#include "duatic_ethercat_interface/priority_inheriting_mutex.hpp"
+#include "duatic_ecat_interface/types.hpp"
+#include "duatic_ecat_interface/exceptions.hpp"
+#include "duatic_ecat_interface/object_dictionary.hpp"
+#include "duatic_ecat_interface/ethercat_bus.hpp"
+#include "duatic_ecat_interface/priority_inheriting_mutex.hpp"
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 
 class EthercatDevice
@@ -383,4 +383,4 @@ private:
   mutable PriorityInheritingMutex pdo_update_mutex_;
 };
 
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface

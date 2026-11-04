@@ -26,7 +26,7 @@
 
 #include <soem_vendor/ethercat.h>
 
-namespace duatic::ethercat_interface::internal::soem
+namespace duatic::ecat_interface::internal::soem
 {
 /**
  * @brief Simply wraps the some provided context into something more usable
@@ -91,4 +91,4 @@ struct EthercatContext
                            nullptr,
                            0 };
 };
-}  // namespace duatic::ethercat_interface::internal::soem
+}  // namespace duatic::ecat_interface::internal::soem

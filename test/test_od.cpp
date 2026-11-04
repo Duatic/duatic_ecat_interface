@@ -23,9 +23,9 @@
  */
 #include <gtest/gtest.h>
 
-#include "duatic_ethercat_interface/object_dictionary.hpp"
+#include "duatic_ecat_interface/object_dictionary.hpp"
 
-using namespace duatic::ethercat_interface;  // NOLINT(build/namespaces)
+using namespace duatic::ecat_interface;  // NOLINT(build/namespaces)
 
 namespace
 {

@@ -1,12 +1,12 @@
-# duatic_ethercat_interface
+# duatic_ecat_interface
 
 A multibackend C++20 ethercat master library.
 
-[![Humble](https://github.com/Duatic/duatic_ethercat_interface/raw/badges/humble.svg)](https://github.com/Duatic/duatic_ethercat_interface/actions/workflows/ci.yml)
-[![Jazzy](https://github.com/Duatic/duatic_ethercat_interface/raw/badges/jazzy.svg)](https://github.com/Duatic/duatic_ethercat_interface/actions/workflows/ci.yml)
-[![Kilted](https://github.com/Duatic/duatic_ethercat_interface/raw/badges/kilted.svg)](https://github.com/Duatic/duatic_ethercat_interface/actions/workflows/ci.yml)
-[![Lyrical](https://github.com/Duatic/duatic_ethercat_interface/raw/badges/lyrical.svg)](https://github.com/Duatic/duatic_ethercat_interface/actions/workflows/ci.yml)
-[![Rolling](https://github.com/Duatic/duatic_ethercat_interface/raw/badges/rolling.svg)](https://github.com/Duatic/duatic_ethercat_interface/actions/workflows/ci.yml)
+[![Humble](https://github.com/Duatic/duatic_ecat_interface/raw/badges/humble.svg)](https://github.com/Duatic/duatic_ecat_interface/actions/workflows/ci.yml)
+[![Jazzy](https://github.com/Duatic/duatic_ecat_interface/raw/badges/jazzy.svg)](https://github.com/Duatic/duatic_ecat_interface/actions/workflows/ci.yml)
+[![Kilted](https://github.com/Duatic/duatic_ecat_interface/raw/badges/kilted.svg)](https://github.com/Duatic/duatic_ecat_interface/actions/workflows/ci.yml)
+[![Lyrical](https://github.com/Duatic/duatic_ecat_interface/raw/badges/lyrical.svg)](https://github.com/Duatic/duatic_ecat_interface/actions/workflows/ci.yml)
+[![Rolling](https://github.com/Duatic/duatic_ecat_interface/raw/badges/rolling.svg)](https://github.com/Duatic/duatic_ecat_interface/actions/workflows/ci.yml)
 
 This library supports different ethercat master library backends depending on the users need.
 

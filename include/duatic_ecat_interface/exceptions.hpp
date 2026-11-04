@@ -28,9 +28,9 @@
 #include <optional>
 #include <string>
 
-#include "duatic_ethercat_interface/backend.hpp"
+#include "duatic_ecat_interface/backend.hpp"
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 /**
  * @brief BackendError - Exception which represents and error which comes for a specific backend
@@ -97,4 +97,4 @@ class ExecutorError : public std::runtime_error
 public:
   using std::runtime_error::runtime_error;
 };
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface

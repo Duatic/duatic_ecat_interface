@@ -35,9 +35,9 @@
 #include <optional>
 #include <array>
 
-#include "duatic_ethercat_interface/value_diagnostics_wrapper.hpp"
+#include "duatic_ecat_interface/value_diagnostics_wrapper.hpp"
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 // Timing types used within the ethercat sdk
 using StandardClock = std::chrono::system_clock;
@@ -456,4 +456,4 @@ struct FoEReadResult
 
 using FoEReadValue = ValueDiagnosticsWrapper<std::span<const uint8_t>, FoEReadResult>;
 
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface

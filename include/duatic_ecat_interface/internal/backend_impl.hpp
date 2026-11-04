@@ -24,37 +24,19 @@
 
 #pragma once
 
-#include <string>
-
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface::internal
 {
-
 /**
- * @brief Idenditier for the active (compiled in backend)
+ * @brief INTERNAL interface representation for a backend implementation
+ * @note this is an internal header and shall not be installed
+ *
+ * This interface class describes the abstract base interface for a specific backend implementation
  */
-enum class Backend
+class BackendImplInterface
 {
-  Unknown = 0,
-  SOEM = 1,
-  Etherlab = 2
+public:
+  virtual int initialize() = 0;
+  virtual int get_device_count() const;
+  virtual ~BackendImplInterface() = default;
 };
-
-inline std::string to_string(const Backend b)
-{
-  switch (b) {
-    case Backend::Unknown:
-      return "Unknown";
-    case Backend::SOEM:
-      return "SOEM";
-    case Backend::Etherlab:
-      return "Etherlab";
-  }
-  return "Unknown";
-}
-
-inline std::ostream& operator<<(std::ostream& os, const Backend b)
-{
-  return os << to_string(b);
-}
-
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface::internal

@@ -24,8 +24,37 @@
 
 #pragma once
 
-// This is a convenience header
-// Please use this header instead of directly including any of the other files directly
-#include "duatic_ethercat_interface/ethercat_bus.hpp"
-#include "duatic_ethercat_interface/ethercat_device.hpp"
-#include "duatic_ethercat_interface/executor.hpp"
+#include <string>
+
+namespace duatic::ecat_interface
+{
+
+/**
+ * @brief Idenditier for the active (compiled in backend)
+ */
+enum class Backend
+{
+  Unknown = 0,
+  SOEM = 1,
+  Etherlab = 2
+};
+
+inline std::string to_string(const Backend b)
+{
+  switch (b) {
+    case Backend::Unknown:
+      return "Unknown";
+    case Backend::SOEM:
+      return "SOEM";
+    case Backend::Etherlab:
+      return "Etherlab";
+  }
+  return "Unknown";
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Backend b)
+{
+  return os << to_string(b);
+}
+
+}  // namespace duatic::ecat_interface

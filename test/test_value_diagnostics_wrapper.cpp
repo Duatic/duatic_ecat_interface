@@ -26,9 +26,9 @@
 
 #include <string>
 
-#include "duatic_ethercat_interface/value_diagnostics_wrapper.hpp"
+#include "duatic_ecat_interface/value_diagnostics_wrapper.hpp"
 
-using namespace duatic::ethercat_interface;  // NOLINT(build/namespaces)
+using namespace duatic::ecat_interface;  // NOLINT(build/namespaces)
 
 namespace
 {

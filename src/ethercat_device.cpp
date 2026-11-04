@@ -22,10 +22,10 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "duatic_ethercat_interface/ethercat_device.hpp"
-#include "duatic_ethercat_interface/ethercat_bus.hpp"
+#include "duatic_ecat_interface/ethercat_device.hpp"
+#include "duatic_ecat_interface/ethercat_bus.hpp"
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 EthercatDevice::EthercatDevice(EthercatBus* bus, DeviceInfo device_info) : bus_(bus), device_info_(device_info)
 {
@@ -77,4 +77,4 @@ void EthercatDevice::update_read(const HighPrecisionTimeStamp& tp)
   tx_pdo_last_read_time_ = tp;
 };
 
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface
