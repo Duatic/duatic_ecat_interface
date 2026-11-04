@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(duatic_ethercat_interface)
+project(duatic_ecat_interface)
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
@@ -16,22 +16,22 @@ foreach(Dependency IN ITEMS ${PACKAGE_DEPENDENCIES})
 endforeach()
 
 
-add_library(duatic_ethercat_interface
+add_library(duatic_ecat_interface
   src/internal/soem/soem_backend.cpp
   src/internal/nic.cpp
   src/ethercat_device.cpp
   src/bus_diagnostics.cpp
 )
-add_library(duatic_ethercat_interface::duatic_ethercat_interface ALIAS duatic_ethercat_interface)
-target_compile_features(duatic_ethercat_interface PUBLIC c_std_99 cxx_std_20)  # Require C99 and C++20
-target_include_directories(duatic_ethercat_interface PUBLIC
+add_library(duatic_ecat_interface::duatic_ecat_interface ALIAS duatic_ecat_interface)
+target_compile_features(duatic_ecat_interface PUBLIC c_std_99 cxx_std_20)  # Require C99 and C++20
+target_include_directories(duatic_ecat_interface PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
 
 
-target_link_libraries(duatic_ethercat_interface duatic_message_logger::duatic_message_logger soem_vendor::soem_vendor)
+target_link_libraries(duatic_ecat_interface duatic_message_logger::duatic_message_logger soem_vendor::soem_vendor)
 # enable additional warnings
-target_compile_options(duatic_ethercat_interface PRIVATE
+target_compile_options(duatic_ecat_interface PRIVATE
   -Wall
   -Wextra
   -Wpedantic
@@ -53,20 +53,20 @@ target_compile_options(duatic_ethercat_interface PRIVATE
 
 # Causes the visibility macros to use dllexport rather than dllimport,
 # which is appropriate when building the dll but not consuming it.
-target_compile_definitions(duatic_ethercat_interface PRIVATE "duatic_ethercat_interface_BUILDING_LIBRARY")
+target_compile_definitions(duatic_ecat_interface PRIVATE "duatic_ecat_interface_BUILDING_LIBRARY")
 
 # Demo
 add_executable(demo ./src/example/demo.cpp)
 target_compile_features(demo PUBLIC c_std_99 cxx_std_20)
 target_include_directories(demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(demo duatic_ethercat_interface)
+target_link_libraries(demo duatic_ecat_interface)
 
 # Tooling
 find_package(cxxopts REQUIRED)
 add_executable(bus_scanner ./src/tools/bus_scanner.cpp)
 target_compile_features(bus_scanner PUBLIC c_std_99 cxx_std_20)
 target_include_directories(bus_scanner PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(bus_scanner duatic_ethercat_interface cxxopts::cxxopts)
+target_link_libraries(bus_scanner duatic_ecat_interface cxxopts::cxxopts)
 
 
 
@@ -76,11 +76,11 @@ target_link_libraries(bus_scanner duatic_ethercat_interface cxxopts::cxxopts)
 install(
   DIRECTORY include/
   DESTINATION include/${PROJECT_NAME}
-  REGEX "duatic_ethercat_interface/internal(/|$)" EXCLUDE
+  REGEX "duatic_ecat_interface/internal(/|$)" EXCLUDE
 )
 
 install(
-  TARGETS duatic_ethercat_interface
+  TARGETS duatic_ecat_interface
   EXPORT export_${PROJECT_NAME}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -105,13 +105,13 @@ if(BUILD_TESTING)
   )
 
   target_link_libraries(test_precision_update_rate
-    duatic_ethercat_interface
+    duatic_ecat_interface
   )
   target_link_libraries(test_od
-    duatic_ethercat_interface
+    duatic_ecat_interface
   )
   target_link_libraries(test_value_diagnostics_wrapper
-    duatic_ethercat_interface
+    duatic_ecat_interface
   )
 endif()
 
@@ -119,7 +119,7 @@ ament_export_include_directories(
   "include/${PROJECT_NAME}"
 )
 ament_export_libraries(
-  duatic_ethercat_interface
+  duatic_ecat_interface
 )
 ament_export_targets(
   export_${PROJECT_NAME}

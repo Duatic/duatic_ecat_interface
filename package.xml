@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>duatic_ethercat_interface</name>
+  <name>duatic_ecat_interface</name>
   <version>1.0.0</version>
-  <description>An interface wrapper around ethercat master implementations</description>
+  <description>An interface wrapper around EtherCAT® master implementations</description>
   <maintainer email="lnachtigall@duatic.com">Lennart Nachtigall</maintainer>
   <license>BSD-3-Clause</license>
 
@@ -23,5 +23,6 @@
 
   <export>
     <build_type>ament_cmake</build_type>
+    <duatic_archive_root>public</duatic_archive_root>
   </export>
 </package>

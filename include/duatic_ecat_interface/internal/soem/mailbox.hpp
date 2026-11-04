@@ -20,12 +20,20 @@
  * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * The EtherCAT Technology, and the trade name "EtherCAT" are the intellectual property of, and protected by Beckhoff
+ * Automation GmbH. You may review, edit, compile, link, debug the EtherCAT Master Code, provided that before
+ * implementing into a product, using, selling or otherwise distributing an EtherCAT Master License is obtained from
+ * Beckhoff Automation GmbH & Co.KG.
+ *
+ * To receive a copy of the EtherCAT Master License contact Beckhoff Automation GmbH & Co.KG, Huelshorstweg 20,
+ * D-33415 Verl, Germany (www.beckhoff.com).
  */
 #pragma once
-#include "duatic_ethercat_interface/internal/soem/soem_context.hpp"
-#include "duatic_ethercat_interface/types.hpp"
+#include "duatic_ecat_interface/internal/soem/soem_context.hpp"
+#include "duatic_ecat_interface/types.hpp"
 
-namespace duatic::ethercat_interface::internal::soem
+namespace duatic::ecat_interface::internal::soem
 {
 /// Describes the mailbox access currently in flight, so events popped from
 /// SOEM's error list can be attributed to it. Internal to the SOEM backend.
@@ -181,4 +189,4 @@ static MailboxEvent make_foe_event(const DeviceId device_id, const int wkc)
   }
   return ev;
 }
-}  // namespace duatic::ethercat_interface::internal::soem
+}  // namespace duatic::ecat_interface::internal::soem

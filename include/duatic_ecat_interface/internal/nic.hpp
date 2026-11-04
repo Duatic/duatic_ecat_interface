@@ -20,23 +20,38 @@
  * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * The EtherCAT Technology, and the trade name "EtherCAT" are the intellectual property of, and protected by Beckhoff
+ * Automation GmbH. You may review, edit, compile, link, debug the EtherCAT Master Code, provided that before
+ * implementing into a product, using, selling or otherwise distributing an EtherCAT Master License is obtained from
+ * Beckhoff Automation GmbH & Co.KG.
+ *
+ * To receive a copy of the EtherCAT Master License contact Beckhoff Automation GmbH & Co.KG, Huelshorstweg 20,
+ * D-33415 Verl, Germany (www.beckhoff.com).
  */
 
 #pragma once
 
-namespace duatic::ethercat_interface::internal
+#include <string>
+
+namespace duatic::ecat_interface::nic
 {
 /**
- * @brief INTERNAL interface representation for a backend implementation
- * @note this is an internal header and shall not be installed
+ * @brief Check whether a network interface is administratively up.
  *
- * This interface class describes the abstract base interface for a specific backend implementation
+ * Queries the interface flags via the SIOCGIFFLAGS ioctl and tests for
+ * IFF_UP. This corresponds to the "UP" flag shown by `ip link show`, i.e.
+ * the interface is enabled by configuration. It does not indicate whether
+ * a carrier is present (no cable, no link partner) or whether an address
+ * has been assigned.
+ *
+ * @param interface_name Name of the interface, e.g. "eth0". Must be
+ *                       non-empty and shorter than IFNAMSIZ.
+ *
+ * @return true if the interface exists and has IFF_UP set,
+ *         false otherwise — including when the name is invalid, the
+ *         interface does not exist, or the socket/ioctl call fails.
  */
-class BackendImplInterface
-{
-public:
-  virtual int initialize() = 0;
-  virtual int get_device_count() const;
-  virtual ~BackendImplInterface() = default;
-};
-}  // namespace duatic::ethercat_interface::internal
+bool is_up(const std::string interface_name);
+
+}  // namespace duatic::ecat_interface::nic

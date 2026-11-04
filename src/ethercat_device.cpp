@@ -20,12 +20,20 @@
  * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * The EtherCAT Technology, and the trade name "EtherCAT" are the intellectual property of, and protected by Beckhoff
+ * Automation GmbH. You may review, edit, compile, link, debug the EtherCAT Master Code, provided that before
+ * implementing into a product, using, selling or otherwise distributing an EtherCAT Master License is obtained from
+ * Beckhoff Automation GmbH & Co.KG.
+ *
+ * To receive a copy of the EtherCAT Master License contact Beckhoff Automation GmbH & Co.KG, Huelshorstweg 20,
+ * D-33415 Verl, Germany (www.beckhoff.com).
  */
 
-#include "duatic_ethercat_interface/ethercat_device.hpp"
-#include "duatic_ethercat_interface/ethercat_bus.hpp"
+#include "duatic_ecat_interface/ethercat_device.hpp"
+#include "duatic_ecat_interface/ethercat_bus.hpp"
 
-namespace duatic::ethercat_interface
+namespace duatic::ecat_interface
 {
 EthercatDevice::EthercatDevice(EthercatBus* bus, DeviceInfo device_info) : bus_(bus), device_info_(device_info)
 {
@@ -77,4 +85,4 @@ void EthercatDevice::update_read(const HighPrecisionTimeStamp& tp)
   tx_pdo_last_read_time_ = tp;
 };
 
-}  // namespace duatic::ethercat_interface
+}  // namespace duatic::ecat_interface
