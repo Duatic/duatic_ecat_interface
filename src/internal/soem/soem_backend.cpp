@@ -136,6 +136,17 @@ struct EthercatBus::BackendImpl
     }
 
     update_bus_state(BusState::Initialized);
+
+    if (const auto mismatches = compare_network(params_.expected_devices, scan()); !mismatches.empty()) {
+      std::string description = "The network does not match the configured network:";
+      for (const auto& mismatch : mismatches) {
+        description += "\n  " + mismatch;
+      }
+      logging::error(logger_) << description;
+      shutdown();
+      throw BackendError(description, Backend::SOEM);
+    }
+
     // SOEM style iteration - we need to start at 1 because 0 is the master
     for (int i = 1; i < device_count + 1; i++) {
       devices_.emplace_back(std::make_shared<EthercatDevice>(owner_, scan(static_cast<DeviceId>(i))));
@@ -830,6 +841,7 @@ private:
   std::vector<uint8_t> io_map_;
   std::atomic<BusState> state_{ BusState::PreInit };
   std::optional<HighPrecisionTimeStamp> activation_start_tp_{};
+  std::optional<HighPrecisionTimeStamp> last_mailbox_poll_tp_{};
 
   // Device management
   std::vector<std::shared_ptr<EthercatDevice>> devices_;
@@ -923,6 +935,7 @@ private:
     latest_diagnostics_.bus.link_up = nic::is_up(params_.interface);
 
     if (std::unique_lock<std::mutex> lock(mailbox_mutex_, std::try_to_lock); lock.owns_lock()) {
+      poll_mailboxes();
       drain_mailbox_events();
     }
 
@@ -970,7 +983,8 @@ private:
         }
       }
     }
-    return is_diagnostics_enabled(params_.diagnostics.mailbox_diagnostics) ||
+    return params_.mailbox_poll_interval > std::chrono::milliseconds{ 0 } ||
+           is_diagnostics_enabled(params_.diagnostics.mailbox_diagnostics) ||
            is_diagnostics_enabled(params_.diagnostics.esc_diagnostics) ||
            is_diagnostics_enabled(params_.diagnostics.esc_port_diagnostics);
   }
@@ -1082,6 +1096,37 @@ private:
       report_mailbox_event(ev);
     }
     return attributed;
+  }
+
+  /// Reads every input mailbox that holds data, so unsolicited messages such as emergencies
+  /// reach SOEM's error list between accesses. Call with mailbox_mutex_ held.
+  void poll_mailboxes()
+  {
+    if (params_.mailbox_poll_interval <= std::chrono::milliseconds{ 0 }) {
+      return;
+    }
+    const auto now = HighPrecisionClock::now();
+    if (last_mailbox_poll_tp_ && now - *last_mailbox_poll_tp_ < params_.mailbox_poll_interval) {
+      return;
+    }
+    last_mailbox_poll_tp_ = now;
+
+    for (uint16 i = 1; i <= static_cast<uint16>(context_.ecatSlavecount_); i++) {
+      const auto& slave = context_.ecatSlavelist_[i];
+      if (slave.mbx_rl == 0) {
+        continue;
+      }
+      uint16 status = 0;
+      const int wkc =
+          ecx_FPRD(context_.context.port, slave.configadr, ECT_REG_SM1STAT, sizeof(status), &status, EC_TIMEOUTRET);
+      // Bit 3 of the SyncManager status: the input mailbox is full
+      if (wkc <= 0 || (etohs(status) & 0x08) == 0) {
+        continue;
+      }
+      ec_mbxbuft mbx;
+      ec_clearmbx(&mbx);
+      ecx_mbxreceive(&context_.context, i, &mbx, EC_TIMEOUTRET);
+    }
   }
 
   /// Unattributed drain - clears stale entries so the next access starts clean,
