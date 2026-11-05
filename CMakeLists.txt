@@ -103,6 +103,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_value_diagnostics_wrapper
     test/test_value_diagnostics_wrapper.cpp
   )
+  ament_add_gtest(test_network
+    test/test_network.cpp
+  )
 
   target_link_libraries(test_precision_update_rate
     duatic_ecat_interface
@@ -111,6 +114,9 @@ if(BUILD_TESTING)
     duatic_ecat_interface
   )
   target_link_libraries(test_value_diagnostics_wrapper
+    duatic_ecat_interface
+  )
+  target_link_libraries(test_network
     duatic_ecat_interface
   )
 endif()
