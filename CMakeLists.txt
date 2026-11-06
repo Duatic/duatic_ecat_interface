@@ -106,6 +106,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_network
     test/test_network.cpp
   )
+  ament_add_gtest(test_bus_state
+    test/test_bus_state.cpp
+  )
 
   target_link_libraries(test_precision_update_rate
     duatic_ecat_interface
@@ -117,6 +120,9 @@ if(BUILD_TESTING)
     duatic_ecat_interface
   )
   target_link_libraries(test_network
+    duatic_ecat_interface
+  )
+  target_link_libraries(test_bus_state
     duatic_ecat_interface
   )
 endif()

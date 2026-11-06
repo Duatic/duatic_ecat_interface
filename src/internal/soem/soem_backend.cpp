@@ -151,6 +151,12 @@ struct EthercatBus::BackendImpl
       throw BackendError(description, Backend::SOEM);
     }
 
+    // ecx_config_init() requested PreOp but does not wait for it
+    if (!wait_for_device_target_state(0, ec_state::EC_STATE_PRE_OP, params_.timeout_transition_preop)) {
+      shutdown();
+      throw BackendError("Devices did not reach 'PRE_OP' state - aborting initialization", Backend::SOEM);
+    }
+
     // SOEM style iteration - we need to start at 1 because 0 is the master
     for (int i = 1; i < device_count + 1; i++) {
       devices_.emplace_back(std::make_shared<EthercatDevice>(owner_, scan(static_cast<DeviceId>(i))));
@@ -397,7 +403,9 @@ struct EthercatBus::BackendImpl
     }
     // Now we wait for all slaves to reach it
     for (auto& device : devices_) {
-      if (!wait_for_device_target_state(device->get_device_id(), ec_state::EC_STATE_SAFE_OP)) {
+      if (!wait_for_device_target_state(
+              device->get_device_id(), ec_state::EC_STATE_SAFE_OP,
+              transition_timeout(params_, ec_state::EC_STATE_PRE_OP, ec_state::EC_STATE_SAFE_OP))) {
         shutdown();
         throw BackendError("Device did not reach 'SAFE_OP' state - aborting activation", Backend::SOEM);
       }
@@ -450,7 +458,9 @@ struct EthercatBus::BackendImpl
     // Bring all devices into pre-op
     // Note: using device id 0 targets all devices on the bus
     set_device_target_state(0, ec_state::EC_STATE_PRE_OP);
-    wait_for_device_target_state(0, ec_state::EC_STATE_PRE_OP);
+    wait_for_device_target_state(
+        0, ec_state::EC_STATE_PRE_OP,
+        transition_timeout(params_, ec_state::EC_STATE_OPERATIONAL, ec_state::EC_STATE_PRE_OP));
 
     {
       std::scoped_lock lock(pdo_update_mutex_, state_mutex_, mailbox_mutex_);
@@ -735,14 +745,33 @@ struct EthercatBus::BackendImpl
       logging::warning(logger_) << "Cannot change device target state - device not on bus: " << device_id;
       return false;
     }
+    // Boot uses its own mailbox (ETG.1020: AL status codes 0x0015 / 0x0016 otherwise), switched while no access runs
+    if (device_id != 0 && target_state == ec_state::EC_STATE_BOOT) {
+      std::lock_guard<std::mutex> mailbox_lock(mailbox_mutex_);
+      if (!configure_bootstrap_mailbox(device_id)) {
+        return false;
+      }
+    }
+    if (device_id != 0 && target_state == ec_state::EC_STATE_PRE_OP) {
+      std::lock_guard<std::mutex> mailbox_lock(mailbox_mutex_);
+      restore_standard_mailbox(device_id);
+    }
     context_.ecatSlavelist_[device_id].state = target_state;
     return ecx_writestate(&context_.context, device_id) > 0;
   }
 
-  bool wait_for_device_target_state(const DeviceId device_id, ec_state target_state, int timeout = EC_TIMEOUTSTATE)
+  bool wait_for_device_target_state(const DeviceId device_id, ec_state target_state,
+                                    const std::chrono::milliseconds timeout)
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
-    return ecx_statecheck(&context_.context, device_id, target_state, timeout) == target_state;
+    const auto timeout_us = static_cast<int>(std::chrono::microseconds(timeout).count());
+    return ecx_statecheck(&context_.context, device_id, target_state, timeout_us) == target_state;
+  }
+
+  void update_device_states()
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    ecx_readstate(&context_.context);
   }
 
   ec_state get_device_state(const DeviceId device_id)
@@ -824,8 +853,8 @@ struct EthercatBus::BackendImpl
     // Unlike SOEM never force the eeprom away from the device's firmware
     if (context_.ecatSlavelist_[device_id].eep_pdi) {
       uint8 pdi_access = 0;
-      const int wkc = ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPCFG + 1, sizeof(pdi_access), &pdi_access,
-                               EC_TIMEOUTRET);
+      const int wkc =
+          ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPCFG + 1, sizeof(pdi_access), &pdi_access, EC_TIMEOUTRET);
       if (wkc <= 0 || (pdi_access & 0x01) != 0) {
         logging::warning(logger_) << "Device id " << device_id
                                   << ": cannot read the eeprom - the device firmware is accessing it";
@@ -953,12 +982,6 @@ private:
   BusState get_bus_state() const
   {
     return state_;
-  }
-
-  void update_device_states()
-  {
-    std::lock_guard<std::mutex> lock(state_mutex_);
-    ecx_readstate(&context_.context);
   }
 
   std::optional<std::chrono::nanoseconds> internal_pdo_update()
@@ -1173,6 +1196,56 @@ private:
       report_unsolicited_event(std::move(ev));
     }
     return attributed;
+  }
+
+  /// Switches the device's mailbox SyncManagers to the bootstrap mailbox of its SII (word 0x0014, ETG.2000).
+  /// Call with state_mutex_ and mailbox_mutex_ held.
+  bool configure_bootstrap_mailbox(const DeviceId device_id)
+  {
+    std::array<uint8_t, 8> sii{};
+    if (!read_eeprom_untyped(sii, device_id, ECT_SII_BOOTRXMBX)) {
+      logging::error(logger_) << "Device id " << device_id << ": failed to read the bootstrap mailbox from the eeprom";
+      return false;
+    }
+    const auto word = [&sii](std::size_t i) { return static_cast<uint16>(sii[2 * i] | (sii[2 * i + 1] << 8)); };
+    if (word(1) == 0 || word(3) == 0) {
+      logging::error(logger_) << "Device id " << device_id << ": the device does not support the bootstrap state";
+      return false;
+    }
+    auto& slave = context_.ecatSlavelist_[device_id];
+    ec_smt rx{ .StartAddr = htoes(word(0)), .SMlength = htoes(word(1)), .SMflags = slave.SM[0].SMflags };
+    ec_smt tx{ .StartAddr = htoes(word(2)), .SMlength = htoes(word(3)), .SMflags = slave.SM[1].SMflags };
+    if (ecx_FPWR(&context_.ecat_port, slave.configadr, ECT_REG_SM0, sizeof(rx), &rx, EC_TIMEOUTRET) <= 0 ||
+        ecx_FPWR(&context_.ecat_port, slave.configadr, ECT_REG_SM1, sizeof(tx), &tx, EC_TIMEOUTRET) <= 0) {
+      logging::error(logger_) << "Device id " << device_id << ": failed to configure the bootstrap mailbox";
+      return false;
+    }
+    slave.mbx_wo = word(0);
+    slave.mbx_l = word(1);
+    slave.mbx_ro = word(2);
+    slave.mbx_rl = word(3);
+    return true;
+  }
+
+  /// Switches the device's mailbox SyncManagers back to the standard mailbox SOEM configured, if the bootstrap mailbox
+  /// was in use. Call with state_mutex_ and mailbox_mutex_ held.
+  void restore_standard_mailbox(const DeviceId device_id)
+  {
+    auto& slave = context_.ecatSlavelist_[device_id];
+    if (slave.mbx_wo == etohs(slave.SM[0].StartAddr) && slave.mbx_l == etohs(slave.SM[0].SMlength) &&
+        slave.mbx_ro == etohs(slave.SM[1].StartAddr) && slave.mbx_rl == etohs(slave.SM[1].SMlength)) {
+      return;
+    }
+    if (ecx_FPWR(&context_.ecat_port, slave.configadr, ECT_REG_SM0, sizeof(ec_smt), &slave.SM[0], EC_TIMEOUTRET) <= 0 ||
+        ecx_FPWR(&context_.ecat_port, slave.configadr, ECT_REG_SM1, sizeof(ec_smt), &slave.SM[1], EC_TIMEOUTRET) <= 0) {
+      // The device then refuses PreOp with AL status code 0x0016, which the state change reports
+      logging::error(logger_) << "Device id " << device_id << ": failed to restore the standard mailbox";
+      return;
+    }
+    slave.mbx_wo = etohs(slave.SM[0].StartAddr);
+    slave.mbx_l = etohs(slave.SM[0].SMlength);
+    slave.mbx_ro = etohs(slave.SM[1].StartAddr);
+    slave.mbx_rl = etohs(slave.SM[1].SMlength);
   }
 
   /// Returns the eeprom status once the current command finished, nothing on a timeout
@@ -1596,6 +1669,13 @@ bool EthercatBus::change_device_state(const DeviceId device_id, const EthercatDe
 {
   // Convert into soem internal type
   const auto soem_state = map_to_soem_device_state(target_state);
+  if (device_id != 0 && !impl_->has_device_on_bus(device_id)) {
+    logging::warning(logger_) << "Cannot change device target state - device not on bus: " << device_id;
+    return false;
+  }
+  // The timeout depends on the transition, so the current state is needed
+  impl_->update_device_states();
+  const auto timeout = transition_timeout(impl_->get_parameters(), impl_->get_device_state(device_id), soem_state);
   // Request the state change
   bool res = impl_->set_device_target_state(device_id, soem_state);
   if (!res) {
@@ -1607,7 +1687,7 @@ bool EthercatBus::change_device_state(const DeviceId device_id, const EthercatDe
     return res;
   }
 
-  const bool success = impl_->wait_for_device_target_state(device_id, soem_state);
+  const bool success = impl_->wait_for_device_target_state(device_id, soem_state, timeout);
   if (!success) {
     logging::warning(logger_) << "Device went not into desired target state within timeout" << std::endl;
   }
