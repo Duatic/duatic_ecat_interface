@@ -71,7 +71,8 @@ struct DiagnosticsOptions
   // as emergencies, Basic logs emergencies and Tracing every mailbox event. The events themselves are always counted
   // (MailboxStatus), handed to the access they belong to, or else queued for EthercatBus::pop_mailbox_events().
   // The polling is required for an ETG.1500 Class B master: Off (or an interval of 0) disables it, the master then
-  // only receives unsolicited messages during its own accesses
+  // only receives unsolicited messages during its own accesses. The polling runs in update_service(), so on the service
+  // thread once the bus is activated - before that unsolicited messages also only arrive during accesses
   // Please note mailbox diagnostics related types are in the "types.hpp" header
   DiagnosticsLevel mailbox_diagnostics{ DiagnosticsLevel::Basic };
   // How often the input mailboxes are polled while mailbox diagnostics are enabled, a value of 0 disables the polling
