@@ -33,6 +33,7 @@
 #include "duatic_ecat_interface/ethercat_bus.hpp"
 
 #include <mutex>     // NOLINT(build/include_order)
+#include <deque>     // NOLINT(build/include_order)
 #include <thread>    // NOLINT(build/include_order)
 #include <atomic>    // NOLINT(build/include_order)
 #include <optional>  // NOLINT(build/include_order)
@@ -834,6 +835,17 @@ struct EthercatBus::BackendImpl
     return snapshot;
   }
 
+  std::vector<MailboxEvent> pop_mailbox_events()
+  {
+    // Only the swap happens under the lock, so the service thread is never kept waiting by the copy
+    std::deque<MailboxEvent> queued;
+    {
+      std::lock_guard<std::mutex> lock(mailbox_status_mutex_);
+      queued.swap(unsolicited_events_);
+    }
+    return { std::make_move_iterator(queued.begin()), std::make_move_iterator(queued.end()) };
+  }
+
 private:
   // Parameterization
   const Parameters params_;
@@ -856,6 +868,9 @@ private:
   // SDO call sync
   std::mutex mailbox_mutex_;
   MailboxStatus mailbox_status_{};
+  // Events no access could be attributed to (mostly emergencies), until pop_mailbox_events() hands them out
+  std::deque<MailboxEvent> unsolicited_events_;
+  static constexpr std::size_t max_unsolicited_events = 64;
   mutable std::mutex mailbox_status_mutex_;
   // State change related
   std::mutex state_mutex_;
@@ -1097,7 +1112,7 @@ private:
         attributed = std::move(ev);
         continue;
       }
-      report_mailbox_event(ev);
+      report_unsolicited_event(std::move(ev));
     }
     return attributed;
   }
@@ -1147,8 +1162,20 @@ private:
   {
     ec_errort raw{};
     while (ecx_poperror(&context_.context, &raw)) {
-      report_mailbox_event(make_mailbox_event(raw));
+      report_unsolicited_event(make_mailbox_event(raw));
     }
+  }
+
+  /// Reports an event nobody receives as an access result and keeps it for pop_mailbox_events()
+  void report_unsolicited_event(MailboxEvent ev)
+  {
+    report_mailbox_event(ev);
+    std::lock_guard<std::mutex> lock(mailbox_status_mutex_);
+    if (unsolicited_events_.size() == max_unsolicited_events) {
+      unsolicited_events_.pop_front();
+      mailbox_status_.mailbox_events_dropped += 1;
+    }
+    unsolicited_events_.push_back(std::move(ev));
   }
 
   void report_mailbox_event(const MailboxEvent& ev)
@@ -1176,8 +1203,8 @@ private:
     if (!is_diagnostics_enabled(params_.diagnostics.mailbox_diagnostics)) {
       return;
     }
-    // Emergencies are the one kind nobody can observe from a result struct,
-    // so log them at Basic; the rest only under Tracing.
+    // Emergencies are the one kind no result struct carries, so log them at Basic;
+    // the rest only under Tracing.
     const bool always_log = ev.kind == MailboxEventKind::Emergency;
     if (!always_log && params_.diagnostics.mailbox_diagnostics != DiagnosticsLevel::Tracing) {
       return;
@@ -1544,6 +1571,11 @@ template bool EthercatBus::register_write<double>(DeviceId, RegisterAddress, con
 DiagnosticsSnapshot EthercatBus::diagnostics(bool force_update)
 {
   return impl_->diagnostics(force_update);
+}
+
+std::vector<MailboxEvent> EthercatBus::pop_mailbox_events()
+{
+  return impl_->pop_mailbox_events();
 }
 
 // Dispatch functions into a specific ethercat device

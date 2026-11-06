@@ -84,6 +84,7 @@ std::string to_string(const DiagnosticsSnapshot& snap)
   os << "  aborts:      " << snap.mailbox.mailbox_aborts << "\n";
   os << "  timeouts:    " << snap.mailbox.mailbox_timeouts << "\n";
   os << "  emergencies: " << snap.mailbox.mailbox_emergencies << "\n";
+  os << "  dropped:     " << snap.mailbox.mailbox_events_dropped << "\n";
 
   // Per-slave
   os << "\n-- Slaves (" << snap.slaves.size() << ") --\n";

@@ -90,6 +90,7 @@ using EthercatDevicePtr = std::shared_ptr<EthercatDevice>;
  * register_write<T>(...)                            | thread safe
  * diagnostics(force_update = false)                 | thread safe
  * diagnostics(force_update = true)                  | not thread safe
+ * pop_mailbox_events()                              | thread safe
  * list_interfaces() (static)                        | not thread safe
  * used_backend() (static)                           | thread safe
  */
@@ -327,6 +328,19 @@ public:
    * @note only threadsafe if force_update = false
    */
   DiagnosticsSnapshot diagnostics(bool force_update = false);
+
+  /**
+   * @brief pop_mailbox_events - obtain the mailbox events no access could be attributed to, oldest first
+   * These are mostly emergencies, which devices send on their own when an internal error occurs or is cleared
+   * (see MailboxEvent::is_device_fault()). Their evaluation is left to the application
+   * Events belonging to an access are returned in its result instead (e.g. SDOReadResult::mailbox_diagnostics)
+   * The queue is filled at every DiagnosticsOptions::mailbox_diagnostics level, but without the polling unsolicited
+   * messages only arrive during accesses
+   * @return the events received since the last call, at most 64; older ones are dropped and counted in
+   * MailboxStatus::mailbox_events_dropped
+   * @note thread safe
+   */
+  std::vector<MailboxEvent> pop_mailbox_events();
 
   /**
    * @brief list_interface - provide a list with all supported interface names
