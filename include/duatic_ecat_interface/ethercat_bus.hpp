@@ -88,6 +88,7 @@ using EthercatDevicePtr = std::shared_ptr<EthercatDevice>;
  * write_register_untyped(...)                       | thread safe
  * register_read<T>(...)                             | thread safe
  * register_write<T>(...)                            | thread safe
+ * read_eeprom_untyped(...)                          | thread safe
  * diagnostics(force_update = false)                 | thread safe
  * diagnostics(force_update = true)                  | not thread safe
  * pop_mailbox_events()                              | thread safe
@@ -320,6 +321,15 @@ public:
   RegisterReadValue<T> register_read(const DeviceId device_id, const RegisterAddress address, bool check_size = true);
   template <EthercatValueType T>
   bool register_write(const DeviceId device_id, const RegisterAddress address, const T data);
+
+  /**
+   * @brief read_eeprom_untyped - perform a blocking read of the device's EEPROM (SII), starting at a word address
+   * Unlike a register the EEPROM is accessed through the ESC's EEPROM interface: the master takes the EEPROM from the
+   * device's PDI for the read and hands it back afterwards, this takes about 1 ms per 4 bytes. data.size() must be even
+   * @note thread safe
+   */
+  EepromReadResult read_eeprom_untyped(std::span<uint8_t> data, const DeviceId device_id,
+                                       const EepromWordAddress word_address);
 
   /**
    * @brief diagnostics - obtain a diagnostics snapshot of the current bus state

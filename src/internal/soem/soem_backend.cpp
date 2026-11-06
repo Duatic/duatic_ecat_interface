@@ -801,6 +801,55 @@ struct EthercatBus::BackendImpl
     return RegisterWriteResult{ .success = wkc > 0, .working_counter = wkc };
   }
 
+  EepromReadResult read_eeprom_untyped(std::span<uint8_t> data, const DeviceId device_id,
+                                       const EepromWordAddress word_address)
+  {
+    // Only perform operations on an initialized bus
+    if (get_bus_state() == BusState::PreInit || get_bus_state() == BusState::Shutdown) {
+      throw BackendError("Backend not initialized - cannot perform eeprom operations", Backend::SOEM);
+    }
+    // And only on devices that are actually on the bus
+    if (!has_device_on_bus(device_id)) {
+      throw DeviceNotFound("Device with id: " + std::to_string(device_id) + " not found on the bus", Backend::SOEM);
+    }
+    if (data.size() % 2 != 0) {
+      throw std::logic_error("The eeprom is read in 16 bit words, the data size must be even");
+    }
+    if (word_address + data.size() / 2 > 0x10000) {
+      throw std::logic_error("Requested eeprom range exceeds the eeprom address space");
+    }
+
+    // Concurrent reads would interleave the command sequence on the ESC's eeprom interface registers
+    std::lock_guard<std::mutex> lock(eeprom_mutex_);
+    const uint16 configadr = context_.ecatSlavelist_[device_id].configadr;
+    ecx_eeprom2master(&context_.context, device_id);
+    std::size_t bytes_read = 0;
+    bool success = true;
+    while (bytes_read < data.size()) {
+      // Every ESC delivers at least 4 bytes per read, some 8 - the lower 4 suffice and spare us reading which
+      const auto word = static_cast<uint16>(word_address + bytes_read / 2);
+      const uint64 raw = ecx_readeepromFP(&context_.context, configadr, word, EC_TIMEOUTEEP);
+      const uint32 value = etohl(static_cast<uint32>(raw));
+      // The read returns 0 on failure as well, so the status tells. Its checksum / loading error bits describe the
+      // eeprom content, not this access
+      uint16 status = 0;
+      const int wkc = ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPSTAT, sizeof(status), &status, EC_TIMEOUTRET);
+      if (wkc <= 0 || (etohs(status) & (EC_ESTAT_BUSY | EC_ESTAT_NACK)) != 0) {
+        success = false;
+        break;
+      }
+      const std::size_t chunk = std::min<std::size_t>(4, data.size() - bytes_read);
+      for (std::size_t i = 0; i < chunk; i++) {
+        data[bytes_read + i] = static_cast<uint8_t>(value >> (8 * i));
+      }
+      bytes_read += chunk;
+    }
+    // Hand the eeprom back to the PDI, where the configuration left it
+    ecx_eeprom2pdi(&context_.context, device_id);
+
+    return EepromReadResult{ .success = success, .actual_size_read = bytes_read, .data = data.first(bytes_read) };
+  }
+
   DiagnosticsSnapshot diagnostics(bool force_update)
   {
     if (get_bus_state() == BusState::PreInit || get_bus_state() == BusState::Shutdown) {
@@ -874,6 +923,8 @@ private:
   mutable std::mutex mailbox_status_mutex_;
   // State change related
   std::mutex state_mutex_;
+  // EEPROM access
+  std::mutex eeprom_mutex_;
 
   // Backend logger
   logging::Logger logger_;
@@ -1514,6 +1565,12 @@ RegisterWriteResult EthercatBus::write_register_untyped(std::span<const uint8_t>
                                                         const RegisterAddress address)
 {
   return impl_->write_register_untyped(data, device_id, address);
+}
+
+EepromReadResult EthercatBus::read_eeprom_untyped(std::span<uint8_t> data, const DeviceId device_id,
+                                                  const EepromWordAddress word_address)
+{
+  return impl_->read_eeprom_untyped(data, device_id, word_address);
 }
 
 template <EthercatValueType T>
