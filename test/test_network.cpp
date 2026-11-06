@@ -31,7 +31,7 @@
  */
 #include <gtest/gtest.h>
 
-#include "duatic_ecat_interface/types.hpp"
+#include "duatic_ecat_interface/internal/network.hpp"
 
 using namespace duatic::ecat_interface;  // NOLINT(build/namespaces)
 

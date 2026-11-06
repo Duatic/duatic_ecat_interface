@@ -324,8 +324,7 @@ public:
 
   /**
    * @brief read_eeprom_untyped - perform a blocking read of the device's EEPROM (SII), starting at a word address
-   * Unlike a register the EEPROM is accessed through the ESC's EEPROM interface: the master takes the EEPROM from the
-   * device's PDI for the read and hands it back afterwards, this takes about 1 ms per 4 bytes. data.size() must be even
+   * Fails while the device's firmware accesses the EEPROM. data.size() must be even
    * @note thread safe
    */
   EepromReadResult read_eeprom_untyped(std::span<uint8_t> data, const DeviceId device_id,
@@ -340,13 +339,8 @@ public:
   DiagnosticsSnapshot diagnostics(bool force_update = false);
 
   /**
-   * @brief pop_mailbox_events - obtain the mailbox events no access could be attributed to, oldest first
-   * These are mostly emergencies, which devices send on their own when an internal error occurs or is cleared
-   * (see MailboxEvent::is_device_fault()). Their evaluation is left to the application
-   * Events belonging to an access are returned in its result instead (e.g. SDOReadResult::mailbox_diagnostics)
-   * The queue is filled at every DiagnosticsOptions::mailbox_diagnostics level, but without the polling unsolicited
-   * messages only arrive during accesses
-   * @return the events received since the last call, at most 64; older ones are dropped and counted in
+   * @brief pop_mailbox_events - obtain the mailbox events no access was attributed to (mostly emergencies)
+   * @return the events since the last call, oldest first and at most 64 - older ones are counted in
    * MailboxStatus::mailbox_events_dropped
    * @note thread safe
    */

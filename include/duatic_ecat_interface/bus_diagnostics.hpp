@@ -67,15 +67,11 @@ struct DiagnosticsOptions
 
   // PDO related basic diagnostics such as WKC mismatcheds, lost frames, and total frames sent
   DiagnosticsLevel pdo_diagnostics{ DiagnosticsLevel::Basic };
-  // The background work and logging of the mailbox: the polling of the input mailboxes for unsolicited messages such
-  // as emergencies, Basic logs emergencies and Tracing every mailbox event. The events themselves are always counted
-  // (MailboxStatus), handed to the access they belong to, or else queued for EthercatBus::pop_mailbox_events().
-  // The polling is required for an ETG.1500 Class B master: Off (or an interval of 0) disables it, the master then
-  // only receives unsolicited messages during its own accesses. The polling runs in update_service(), so on the service
-  // thread once the bus is activated - before that unsolicited messages also only arrive during accesses
+  // Mailbox logging (Basic: emergencies, Tracing: every event) and the polling of the input mailboxes for emergencies
+  // in update_service() - Off disables the polling, unsolicited messages then only arrive during accesses
   // Please note mailbox diagnostics related types are in the "types.hpp" header
   DiagnosticsLevel mailbox_diagnostics{ DiagnosticsLevel::Basic };
-  // How often the input mailboxes are polled while mailbox diagnostics are enabled, a value of 0 disables the polling
+  // How often update_service() polls the input mailboxes, 0 disables the polling
   std::chrono::milliseconds mailbox_poll_interval{ 100 };
   // Diagnostics related to esc (this is mostly tracking state changes of an esc)
   DiagnosticsLevel esc_diagnostics{ DiagnosticsLevel::Off };
@@ -223,16 +219,13 @@ struct BusStatus
 
 // Cumulative mailbox event counters (CoE/FoE/SoE aborts, timeouts, emergencies), accumulated for
 // the entire lifetime of the owning EthercatBus instance (same never-reset semantics as
-// BusStatus's counters above). They count every event at every mailbox_diagnostics level, whether
-// it is returned with the access it belongs to or queued for EthercatBus::pop_mailbox_events().
-// Emergencies are counted whether they arrive during an access or are picked up by the mailbox polling.
+// BusStatus's counters above). Every event is counted, independent of the mailbox_diagnostics level.
 struct MailboxStatus
 {
   uint64_t mailbox_aborts = 0;
   uint64_t mailbox_timeouts = 0;
   uint64_t mailbox_emergencies = 0;
-  // Unsolicited events EthercatBus::pop_mailbox_events() could not hand out, because its queue was full.
-  // Only meaningful while the application reads the queue, otherwise every event beyond the queue size counts
+  // Events dropped from the full EthercatBus::pop_mailbox_events() queue
   uint64_t mailbox_events_dropped = 0;
 };
 
