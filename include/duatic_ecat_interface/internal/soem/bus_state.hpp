@@ -34,7 +34,10 @@
 
 #include <soem_vendor/ethercat.h>
 
+#include <chrono>
 #include <cstdint>
+
+#include "duatic_ecat_interface/ethercat_bus.hpp"
 
 namespace duatic::ecat_interface::internal::soem
 {
@@ -113,6 +116,32 @@ static constexpr EthercatDeviceState map_from_soem_device_state(const ec_state s
       return EthercatDeviceState::None;
     default:
       return EthercatDeviceState::None;
+  }
+}
+
+// The timeout of a state transition as defined by the ESI timeout elements (ETG.2000)
+inline std::chrono::milliseconds transition_timeout(const EthercatBus::Parameters& params, const ec_state from,
+                                                    const ec_state to)
+{
+  const auto current = static_cast<ec_state>(from & 0x0F);
+  switch (to & 0x0F) {
+    case ec_state::EC_STATE_PRE_OP:
+      return current == ec_state::EC_STATE_INIT ? params.timeout_transition_preop :
+                                                  params.timeout_transition_back_to_init;
+    case ec_state::EC_STATE_BOOT:
+      return params.timeout_transition_preop;
+    case ec_state::EC_STATE_SAFE_OP:
+      if (current == ec_state::EC_STATE_OPERATIONAL) {
+        return params.timeout_transition_back_to_safeop;
+      }
+      // A disabled SafeOp -> Op timeout falls back to the ETG.2000 default of the SafeopOpTimeout
+      return params.timeout_transition_operational > std::chrono::milliseconds{ 0 } ?
+                 params.timeout_transition_operational :
+                 std::chrono::milliseconds{ 10000 };
+    case ec_state::EC_STATE_OPERATIONAL:
+      return params.timeout_transition_operational;
+    default:
+      return params.timeout_transition_back_to_init;
   }
 }
 }  // namespace duatic::ecat_interface::internal::soem
