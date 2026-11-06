@@ -33,7 +33,6 @@
 #include "duatic_ecat_interface/ethercat_bus.hpp"
 
 #include <mutex>     // NOLINT(build/include_order)
-#include <deque>     // NOLINT(build/include_order)
 #include <thread>    // NOLINT(build/include_order)
 #include <atomic>    // NOLINT(build/include_order)
 #include <optional>  // NOLINT(build/include_order)
@@ -52,6 +51,7 @@
 #include "duatic_ecat_interface/internal/soem/bus_state.hpp"
 #include "duatic_ecat_interface/internal/soem/mailbox.hpp"
 #include "duatic_ecat_interface/internal/nic.hpp"
+#include "duatic_ecat_interface/internal/network.hpp"
 
 // Implementation of the EthercatBus for the SOEM library
 namespace duatic::ecat_interface
@@ -129,9 +129,7 @@ struct EthercatBus::BackendImpl
       logging::info(logger_) << "ESC Port Diagnostics is enabled - this has a  veryhigh impact on the timing";
     }
     if (is_mailbox_polling_enabled()) {
-      logging::info(logger_) << "Mailbox polling every " << params_.diagnostics.mailbox_poll_interval.count()
-                             << " ms is enabled - one broadcast frame per interval, more only while a mailbox holds "
-                                "data";
+      logging::info(logger_) << "Mailbox polling is enabled - this has a low impact on the timing";
     }
 
     latest_diagnostics_.bus.link_up = nic::is_up(params_.interface);
@@ -823,7 +821,7 @@ struct EthercatBus::BackendImpl
     std::lock_guard<std::mutex> lock(eeprom_mutex_);
     const uint16 configadr = context_.ecatSlavelist_[device_id].configadr;
 
-    // The master may only take the eeprom while the device's firmware does not access it - SOEM would force it
+    // Unlike SOEM never force the eeprom away from the device's firmware
     if (context_.ecatSlavelist_[device_id].eep_pdi) {
       uint8 pdi_access = 0;
       const int wkc = ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPCFG + 1, sizeof(pdi_access), &pdi_access,
@@ -896,13 +894,10 @@ struct EthercatBus::BackendImpl
 
   std::vector<MailboxEvent> pop_mailbox_events()
   {
-    // Only the swap happens under the lock, so the service thread is never kept waiting by the copy
-    std::deque<MailboxEvent> queued;
-    {
-      std::lock_guard<std::mutex> lock(mailbox_status_mutex_);
-      queued.swap(unsolicited_events_);
-    }
-    return { std::make_move_iterator(queued.begin()), std::make_move_iterator(queued.end()) };
+    std::vector<MailboxEvent> queued;
+    std::lock_guard<std::mutex> lock(mailbox_status_mutex_);
+    queued.swap(unsolicited_events_);
+    return queued;
   }
 
 private:
@@ -928,7 +923,7 @@ private:
   std::mutex mailbox_mutex_;
   MailboxStatus mailbox_status_{};
   // Events no access could be attributed to (mostly emergencies), until pop_mailbox_events() hands them out
-  std::deque<MailboxEvent> unsolicited_events_;
+  std::vector<MailboxEvent> unsolicited_events_;
   static constexpr std::size_t max_unsolicited_events = 64;
   mutable std::mutex mailbox_status_mutex_;
   // State change related
@@ -1180,8 +1175,7 @@ private:
     return attributed;
   }
 
-  /// Waits for the eeprom interface of the device to finish its current command, returns its status or nothing on a
-  /// timeout
+  /// Returns the eeprom status once the current command finished, nothing on a timeout
   std::optional<uint16> wait_for_eeprom_not_busy(const uint16 configadr)
   {
     osal_timert timer;
@@ -1198,50 +1192,38 @@ private:
     return std::nullopt;
   }
 
-  /// Performs a single eeprom read command at the word address into the front of data. Every ESC delivers 4 or 8 bytes
-  /// per command. Returns the number of bytes written to data, 0 on failure. Call with eeprom_mutex_ held.
+  /// Reads the 4 or 8 bytes of one eeprom read command into the front of data, checking every frame unlike
+  /// ecx_readeepromFP. Returns the bytes read, 0 on failure. Call with eeprom_mutex_ held.
   std::size_t read_eeprom_chunk(std::span<uint8_t> data, const uint16 configadr, const uint16 word)
   {
-    // Unlike ecx_readeepromFP this checks every frame, so a failed access is never mistaken for data
     auto status = wait_for_eeprom_not_busy(configadr);
     if (!status) {
       return 0;
     }
-    // The error bits of an earlier command would remain set otherwise
+    // Clear the error bits of an earlier command
     if ((*status & EC_ESTAT_EMASK) != 0) {
       uint16 nop = htoes(static_cast<uint16>(EC_ECMD_NOP));
       if (ecx_FPWR(&context_.ecat_port, configadr, ECT_REG_EEPCTL, sizeof(nop), &nop, EC_TIMEOUTRET) <= 0) {
         return 0;
       }
     }
-
-    // A NACK means the eeprom was not ready to answer, the command is simply repeated
-    for (int attempt = 0; attempt < EC_DEFAULTRETRIES; attempt++) {
-      std::array<uint16, 3> command{ htoes(static_cast<uint16>(EC_ECMD_READ)), htoes(word), 0 };
-      if (ecx_FPWR(&context_.ecat_port, configadr, ECT_REG_EEPCTL, sizeof(command), command.data(), EC_TIMEOUTRET) <=
-          0) {
-        return 0;
-      }
-      status = wait_for_eeprom_not_busy(configadr);
-      if (!status) {
-        return 0;
-      }
-      if ((*status & EC_ESTAT_NACK) != 0) {
-        osal_usleep(eeprom_poll_delay_us * 5);
-        continue;
-      }
-
-      std::array<uint8_t, 8> raw{};
-      const std::size_t raw_size = (*status & EC_ESTAT_R64) != 0 ? 8 : 4;
-      if (ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPDAT, static_cast<uint16>(raw_size), raw.data(),
-                   EC_TIMEOUTRET) <= 0) {
-        return 0;
-      }
-      const std::size_t chunk = std::min(raw_size, data.size());
-      std::copy_n(raw.begin(), chunk, data.begin());
-      return chunk;
+    std::array<uint16, 3> command{ htoes(static_cast<uint16>(EC_ECMD_READ)), htoes(word), 0 };
+    if (ecx_FPWR(&context_.ecat_port, configadr, ECT_REG_EEPCTL, sizeof(command), command.data(), EC_TIMEOUTRET) <= 0) {
+      return 0;
     }
-    return 0;
+    status = wait_for_eeprom_not_busy(configadr);
+    if (!status || (*status & EC_ESTAT_NACK) != 0) {
+      return 0;
+    }
+    std::array<uint8_t, 8> raw{};
+    const std::size_t raw_size = (*status & EC_ESTAT_R64) != 0 ? 8 : 4;
+    if (ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPDAT, static_cast<uint16>(raw_size), raw.data(),
+                 EC_TIMEOUTRET) <= 0) {
+      return 0;
+    }
+    const std::size_t chunk = std::min(raw_size, data.size());
+    std::copy_n(raw.begin(), chunk, data.begin());
+    return chunk;
   }
 
   bool is_mailbox_polling_enabled() const
@@ -1299,7 +1281,7 @@ private:
     report_mailbox_event(ev);
     std::lock_guard<std::mutex> lock(mailbox_status_mutex_);
     if (unsolicited_events_.size() == max_unsolicited_events) {
-      unsolicited_events_.pop_front();
+      unsolicited_events_.erase(unsolicited_events_.begin());
       mailbox_status_.mailbox_events_dropped += 1;
     }
     unsolicited_events_.push_back(std::move(ev));

@@ -42,8 +42,6 @@
 #include <sstream>
 #include <optional>
 #include <array>
-#include <algorithm>
-#include <vector>
 
 #include "duatic_ecat_interface/value_diagnostics_wrapper.hpp"
 
@@ -101,43 +99,6 @@ struct ExpectedDevice
   // Any revision is accepted when not set
   std::optional<uint32_t> revision{};
 };
-
-// Differences between the configured and the existing network, one description each; empty when they match
-inline std::vector<std::string> compare_network(const std::vector<ExpectedDevice>& expected,
-                                                const std::vector<DeviceInfo>& found)
-{
-  std::vector<std::string> mismatches;
-  if (expected.empty()) {
-    return mismatches;
-  }
-  if (expected.size() != found.size()) {
-    mismatches.push_back("expected " + std::to_string(expected.size()) + " devices, found " +
-                         std::to_string(found.size()));
-  }
-  const auto hex = [](uint32_t value) {
-    std::ostringstream os;
-    os << "0x" << std::hex << std::uppercase << value;
-    return os.str();
-  };
-  for (const auto& e : expected) {
-    const auto device = std::find_if(found.begin(), found.end(), [&e](const DeviceInfo& d) { return d.id == e.id; });
-    const std::string prefix = "device " + std::to_string(e.id) + ": ";
-    if (device == found.end()) {
-      mismatches.push_back(prefix + "not on the bus");
-      continue;
-    }
-    if (device->vendor_id != e.vendor_id) {
-      mismatches.push_back(prefix + "vendor id " + hex(device->vendor_id) + ", expected " + hex(e.vendor_id));
-    }
-    if (device->product_id != e.product_id) {
-      mismatches.push_back(prefix + "product code " + hex(device->product_id) + ", expected " + hex(e.product_id));
-    }
-    if (e.revision && device->revision != *e.revision) {
-      mismatches.push_back(prefix + "revision " + hex(device->revision) + ", expected " + hex(*e.revision));
-    }
-  }
-  return mismatches;
-}
 
 // Representation of ethercat device states
 enum class EthercatDeviceState
