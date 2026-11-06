@@ -822,30 +822,40 @@ struct EthercatBus::BackendImpl
     // Concurrent reads would interleave the command sequence on the ESC's eeprom interface registers
     std::lock_guard<std::mutex> lock(eeprom_mutex_);
     const uint16 configadr = context_.ecatSlavelist_[device_id].configadr;
-    ecx_eeprom2master(&context_.context, device_id);
+
+    // The master may only take the eeprom while the device's firmware does not access it - SOEM would force it
+    if (context_.ecatSlavelist_[device_id].eep_pdi) {
+      uint8 pdi_access = 0;
+      const int wkc = ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPCFG + 1, sizeof(pdi_access), &pdi_access,
+                               EC_TIMEOUTRET);
+      if (wkc <= 0 || (pdi_access & 0x01) != 0) {
+        logging::warning(logger_) << "Device id " << device_id
+                                  << ": cannot read the eeprom - the device firmware is accessing it";
+        return EepromReadResult{};
+      }
+    }
+    if (ecx_eeprom2master(&context_.context, device_id) <= 0) {
+      logging::error(logger_) << "Device id " << device_id << ": failed to take control of the eeprom";
+      return EepromReadResult{};
+    }
+
     std::size_t bytes_read = 0;
     bool success = true;
     while (bytes_read < data.size()) {
-      // Every ESC delivers at least 4 bytes per read, some 8 - the lower 4 suffice and spare us reading which
       const auto word = static_cast<uint16>(word_address + bytes_read / 2);
-      const uint64 raw = ecx_readeepromFP(&context_.context, configadr, word, EC_TIMEOUTEEP);
-      const uint32 value = etohl(static_cast<uint32>(raw));
-      // The read returns 0 on failure as well, so the status tells. Its checksum / loading error bits describe the
-      // eeprom content, not this access
-      uint16 status = 0;
-      const int wkc = ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPSTAT, sizeof(status), &status, EC_TIMEOUTRET);
-      if (wkc <= 0 || (etohs(status) & (EC_ESTAT_BUSY | EC_ESTAT_NACK)) != 0) {
+      const std::size_t chunk_read = read_eeprom_chunk(data.subspan(bytes_read), configadr, word);
+      if (chunk_read == 0) {
         success = false;
         break;
       }
-      const std::size_t chunk = std::min<std::size_t>(4, data.size() - bytes_read);
-      for (std::size_t i = 0; i < chunk; i++) {
-        data[bytes_read + i] = static_cast<uint8_t>(value >> (8 * i));
-      }
-      bytes_read += chunk;
+      bytes_read += chunk_read;
     }
+
     // Hand the eeprom back to the PDI, where the configuration left it
-    ecx_eeprom2pdi(&context_.context, device_id);
+    if (ecx_eeprom2pdi(&context_.context, device_id) <= 0) {
+      logging::error(logger_) << "Device id " << device_id << ": failed to hand the eeprom back to the device";
+      success = false;
+    }
 
     return EepromReadResult{ .success = success, .actual_size_read = bytes_read, .data = data.first(bytes_read) };
   }
@@ -925,6 +935,8 @@ private:
   std::mutex state_mutex_;
   // EEPROM access
   std::mutex eeprom_mutex_;
+  // Pause between two polls of the eeprom interface, SOEM's EC_LOCALDELAY which it keeps private
+  static constexpr uint32 eeprom_poll_delay_us = 200;
 
   // Backend logger
   logging::Logger logger_;
@@ -1168,6 +1180,70 @@ private:
     return attributed;
   }
 
+  /// Waits for the eeprom interface of the device to finish its current command, returns its status or nothing on a
+  /// timeout
+  std::optional<uint16> wait_for_eeprom_not_busy(const uint16 configadr)
+  {
+    osal_timert timer;
+    osal_timer_start(&timer, EC_TIMEOUTEEP);
+    do {
+      uint16 status = 0;
+      const int wkc = ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPSTAT, sizeof(status), &status, EC_TIMEOUTRET);
+      status = etohs(status);
+      if (wkc > 0 && (status & EC_ESTAT_BUSY) == 0) {
+        return status;
+      }
+      osal_usleep(eeprom_poll_delay_us);
+    } while (!osal_timer_is_expired(&timer));
+    return std::nullopt;
+  }
+
+  /// Performs a single eeprom read command at the word address into the front of data. Every ESC delivers 4 or 8 bytes
+  /// per command. Returns the number of bytes written to data, 0 on failure. Call with eeprom_mutex_ held.
+  std::size_t read_eeprom_chunk(std::span<uint8_t> data, const uint16 configadr, const uint16 word)
+  {
+    // Unlike ecx_readeepromFP this checks every frame, so a failed access is never mistaken for data
+    auto status = wait_for_eeprom_not_busy(configadr);
+    if (!status) {
+      return 0;
+    }
+    // The error bits of an earlier command would remain set otherwise
+    if ((*status & EC_ESTAT_EMASK) != 0) {
+      uint16 nop = htoes(static_cast<uint16>(EC_ECMD_NOP));
+      if (ecx_FPWR(&context_.ecat_port, configadr, ECT_REG_EEPCTL, sizeof(nop), &nop, EC_TIMEOUTRET) <= 0) {
+        return 0;
+      }
+    }
+
+    // A NACK means the eeprom was not ready to answer, the command is simply repeated
+    for (int attempt = 0; attempt < EC_DEFAULTRETRIES; attempt++) {
+      std::array<uint16, 3> command{ htoes(static_cast<uint16>(EC_ECMD_READ)), htoes(word), 0 };
+      if (ecx_FPWR(&context_.ecat_port, configadr, ECT_REG_EEPCTL, sizeof(command), command.data(), EC_TIMEOUTRET) <=
+          0) {
+        return 0;
+      }
+      status = wait_for_eeprom_not_busy(configadr);
+      if (!status) {
+        return 0;
+      }
+      if ((*status & EC_ESTAT_NACK) != 0) {
+        osal_usleep(eeprom_poll_delay_us * 5);
+        continue;
+      }
+
+      std::array<uint8_t, 8> raw{};
+      const std::size_t raw_size = (*status & EC_ESTAT_R64) != 0 ? 8 : 4;
+      if (ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPDAT, static_cast<uint16>(raw_size), raw.data(),
+                   EC_TIMEOUTRET) <= 0) {
+        return 0;
+      }
+      const std::size_t chunk = std::min(raw_size, data.size());
+      std::copy_n(raw.begin(), chunk, data.begin());
+      return chunk;
+    }
+    return 0;
+  }
+
   bool is_mailbox_polling_enabled() const
   {
     return is_diagnostics_enabled(params_.diagnostics.mailbox_diagnostics) &&
@@ -1288,7 +1364,8 @@ private:
       return { std::move(event), event && event->severity == MailboxEventSeverity::Error };
     }
     if (event) {
-      report_mailbox_event(*event);
+      // The result carries the FoE code instead, so the event is handed out through pop_mailbox_events()
+      report_unsolicited_event(std::move(*event));
     }
     // A decoded FoE code is more specific than anything the drain could have found.
     event = make_foe_event(acc.device_id, wkc);
