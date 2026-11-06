@@ -117,10 +117,6 @@ public:
     // Devices the network has to consist of, compared during initialize(); empty accepts any network
     std::vector<ExpectedDevice> expected_devices{};
 
-    // How often the service thread reads the input mailboxes for unsolicited messages such as emergencies
-    // A value of 0 disables polling
-    std::chrono::milliseconds mailbox_poll_interval{ 100 };
-
     // Configure various diagnostic options related to the bus
     DiagnosticsOptions diagnostics{};
   };
