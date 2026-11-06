@@ -127,6 +127,11 @@ struct EthercatBus::BackendImpl
     if (is_diagnostics_enabled(params_.diagnostics.esc_port_diagnostics)) {
       logging::info(logger_) << "ESC Port Diagnostics is enabled - this has a  veryhigh impact on the timing";
     }
+    if (is_mailbox_polling_enabled()) {
+      logging::info(logger_) << "Mailbox polling every " << params_.diagnostics.mailbox_poll_interval.count()
+                             << " ms is enabled - one broadcast frame per interval, more only while a mailbox holds "
+                                "data";
+    }
 
     latest_diagnostics_.bus.link_up = nic::is_up(params_.interface);
     if (!latest_diagnostics_.bus.link_up) {
@@ -983,8 +988,7 @@ private:
         }
       }
     }
-    return params_.mailbox_poll_interval > std::chrono::milliseconds{ 0 } ||
-           is_diagnostics_enabled(params_.diagnostics.mailbox_diagnostics) ||
+    return is_diagnostics_enabled(params_.diagnostics.mailbox_diagnostics) ||
            is_diagnostics_enabled(params_.diagnostics.esc_diagnostics) ||
            is_diagnostics_enabled(params_.diagnostics.esc_port_diagnostics);
   }
@@ -1098,34 +1102,42 @@ private:
     return attributed;
   }
 
+  bool is_mailbox_polling_enabled() const
+  {
+    return is_diagnostics_enabled(params_.diagnostics.mailbox_diagnostics) &&
+           params_.diagnostics.mailbox_poll_interval > std::chrono::milliseconds{ 0 };
+  }
+
   /// Reads every input mailbox that holds data, so unsolicited messages such as emergencies
   /// reach SOEM's error list between accesses. Call with mailbox_mutex_ held.
   void poll_mailboxes()
   {
-    if (params_.mailbox_poll_interval <= std::chrono::milliseconds{ 0 }) {
+    if (!is_mailbox_polling_enabled()) {
       return;
     }
     const auto now = HighPrecisionClock::now();
-    if (last_mailbox_poll_tp_ && now - *last_mailbox_poll_tp_ < params_.mailbox_poll_interval) {
+    if (last_mailbox_poll_tp_ && now - *last_mailbox_poll_tp_ < params_.diagnostics.mailbox_poll_interval) {
       return;
     }
     last_mailbox_poll_tp_ = now;
 
+    // A broadcast read ORs the SyncManager 1 status of all devices, so one frame tells whether any input mailbox is
+    // full (bit 3) - the idle case costs a single frame regardless of the number of devices
+    uint16 status = 0;
+    const int wkc = ecx_BRD(context_.context.port, 0, ECT_REG_SM1STAT, sizeof(status), &status, EC_TIMEOUTRET);
+    if (wkc <= 0 || (etohs(status) & 0x08) == 0) {
+      return;
+    }
+
     for (uint16 i = 1; i <= static_cast<uint16>(context_.ecatSlavecount_); i++) {
-      const auto& slave = context_.ecatSlavelist_[i];
-      if (slave.mbx_rl == 0) {
+      if (context_.ecatSlavelist_[i].mbx_rl == 0) {
         continue;
       }
-      uint16 status = 0;
-      const int wkc =
-          ecx_FPRD(context_.context.port, slave.configadr, ECT_REG_SM1STAT, sizeof(status), &status, EC_TIMEOUTRET);
-      // Bit 3 of the SyncManager status: the input mailbox is full
-      if (wkc <= 0 || (etohs(status) & 0x08) == 0) {
-        continue;
-      }
+      // Timeout 0 makes ecx_mbxreceive read the status and the mailbox once: with a timeout it keeps reading the
+      // emptied mailbox after an emergency, and the repeat requests that triggers deliver the emergency again
       ec_mbxbuft mbx;
       ec_clearmbx(&mbx);
-      ecx_mbxreceive(&context_.context, i, &mbx, EC_TIMEOUTRET);
+      ecx_mbxreceive(&context_.context, i, &mbx, 0);
     }
   }
 
