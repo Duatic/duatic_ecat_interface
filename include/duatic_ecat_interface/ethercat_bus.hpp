@@ -110,9 +110,9 @@ public:
     std::chrono::nanoseconds dc_sync0_shift{};
     std::chrono::nanoseconds master_send_offset{};
 
-    // Time to wait for all devices to reach operational state
+    // Time to wait for all devices to reach operational state, the SafeopOpTimeout of the DuaDrive ESI
     // A value of 0 will disable the timeout
-    std::chrono::milliseconds timeout_transition_operational{ 1000 };
+    std::chrono::milliseconds timeout_transition_operational{ 9000 };
 
     // Devices the network has to consist of, compared during initialize(); empty accepts any network
     std::vector<ExpectedDevice> expected_devices{};
