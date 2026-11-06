@@ -51,6 +51,7 @@
 #include "duatic_ecat_interface/internal/soem/bus_state.hpp"
 #include "duatic_ecat_interface/internal/soem/mailbox.hpp"
 #include "duatic_ecat_interface/internal/nic.hpp"
+#include "duatic_ecat_interface/internal/network.hpp"
 
 // Implementation of the EthercatBus for the SOEM library
 namespace duatic::ecat_interface
@@ -127,6 +128,9 @@ struct EthercatBus::BackendImpl
     if (is_diagnostics_enabled(params_.diagnostics.esc_port_diagnostics)) {
       logging::info(logger_) << "ESC Port Diagnostics is enabled - this has a  veryhigh impact on the timing";
     }
+    if (is_mailbox_polling_enabled()) {
+      logging::info(logger_) << "Mailbox polling is enabled - this has a low impact on the timing";
+    }
 
     latest_diagnostics_.bus.link_up = nic::is_up(params_.interface);
     if (!latest_diagnostics_.bus.link_up) {
@@ -136,6 +140,23 @@ struct EthercatBus::BackendImpl
     }
 
     update_bus_state(BusState::Initialized);
+
+    if (const auto mismatches = compare_network(params_.expected_devices, scan()); !mismatches.empty()) {
+      std::string description = "The network does not match the configured network:";
+      for (const auto& mismatch : mismatches) {
+        description += "\n  " + mismatch;
+      }
+      logging::error(logger_) << description;
+      shutdown();
+      throw BackendError(description, Backend::SOEM);
+    }
+
+    // ecx_config_init() requested PreOp but does not wait for it
+    if (!wait_for_device_target_state(0, ec_state::EC_STATE_PRE_OP, params_.timeout_transition_preop)) {
+      shutdown();
+      throw BackendError("Devices did not reach 'PRE_OP' state - aborting initialization", Backend::SOEM);
+    }
+
     // SOEM style iteration - we need to start at 1 because 0 is the master
     for (int i = 1; i < device_count + 1; i++) {
       devices_.emplace_back(std::make_shared<EthercatDevice>(owner_, scan(static_cast<DeviceId>(i))));
@@ -382,7 +403,9 @@ struct EthercatBus::BackendImpl
     }
     // Now we wait for all slaves to reach it
     for (auto& device : devices_) {
-      if (!wait_for_device_target_state(device->get_device_id(), ec_state::EC_STATE_SAFE_OP)) {
+      if (!wait_for_device_target_state(
+              device->get_device_id(), ec_state::EC_STATE_SAFE_OP,
+              transition_timeout(params_, ec_state::EC_STATE_PRE_OP, ec_state::EC_STATE_SAFE_OP))) {
         shutdown();
         throw BackendError("Device did not reach 'SAFE_OP' state - aborting activation", Backend::SOEM);
       }
@@ -435,7 +458,9 @@ struct EthercatBus::BackendImpl
     // Bring all devices into pre-op
     // Note: using device id 0 targets all devices on the bus
     set_device_target_state(0, ec_state::EC_STATE_PRE_OP);
-    wait_for_device_target_state(0, ec_state::EC_STATE_PRE_OP);
+    wait_for_device_target_state(
+        0, ec_state::EC_STATE_PRE_OP,
+        transition_timeout(params_, ec_state::EC_STATE_OPERATIONAL, ec_state::EC_STATE_PRE_OP));
 
     {
       std::scoped_lock lock(pdo_update_mutex_, state_mutex_, mailbox_mutex_);
@@ -720,14 +745,33 @@ struct EthercatBus::BackendImpl
       logging::warning(logger_) << "Cannot change device target state - device not on bus: " << device_id;
       return false;
     }
+    // Boot uses its own mailbox (ETG.1020: AL status codes 0x0015 / 0x0016 otherwise), switched while no access runs
+    if (device_id != 0 && target_state == ec_state::EC_STATE_BOOT) {
+      std::lock_guard<std::mutex> mailbox_lock(mailbox_mutex_);
+      if (!configure_bootstrap_mailbox(device_id)) {
+        return false;
+      }
+    }
+    if (device_id != 0 && target_state == ec_state::EC_STATE_PRE_OP) {
+      std::lock_guard<std::mutex> mailbox_lock(mailbox_mutex_);
+      restore_standard_mailbox(device_id);
+    }
     context_.ecatSlavelist_[device_id].state = target_state;
     return ecx_writestate(&context_.context, device_id) > 0;
   }
 
-  bool wait_for_device_target_state(const DeviceId device_id, ec_state target_state, int timeout = EC_TIMEOUTSTATE)
+  bool wait_for_device_target_state(const DeviceId device_id, ec_state target_state,
+                                    const std::chrono::milliseconds timeout)
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
-    return ecx_statecheck(&context_.context, device_id, target_state, timeout) == target_state;
+    const auto timeout_us = static_cast<int>(std::chrono::microseconds(timeout).count());
+    return ecx_statecheck(&context_.context, device_id, target_state, timeout_us) == target_state;
+  }
+
+  void update_device_states()
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    ecx_readstate(&context_.context);
   }
 
   ec_state get_device_state(const DeviceId device_id)
@@ -784,6 +828,65 @@ struct EthercatBus::BackendImpl
     return RegisterWriteResult{ .success = wkc > 0, .working_counter = wkc };
   }
 
+  EepromReadResult read_eeprom_untyped(std::span<uint8_t> data, const DeviceId device_id,
+                                       const EepromWordAddress word_address)
+  {
+    // Only perform operations on an initialized bus
+    if (get_bus_state() == BusState::PreInit || get_bus_state() == BusState::Shutdown) {
+      throw BackendError("Backend not initialized - cannot perform eeprom operations", Backend::SOEM);
+    }
+    // And only on devices that are actually on the bus
+    if (!has_device_on_bus(device_id)) {
+      throw DeviceNotFound("Device with id: " + std::to_string(device_id) + " not found on the bus", Backend::SOEM);
+    }
+    if (data.size() % 2 != 0) {
+      throw std::logic_error("The eeprom is read in 16 bit words, the data size must be even");
+    }
+    if (word_address + data.size() / 2 > 0x10000) {
+      throw std::logic_error("Requested eeprom range exceeds the eeprom address space");
+    }
+
+    // Concurrent reads would interleave the command sequence on the ESC's eeprom interface registers
+    std::lock_guard<std::mutex> lock(eeprom_mutex_);
+    const uint16 configadr = context_.ecatSlavelist_[device_id].configadr;
+
+    // Unlike SOEM never force the eeprom away from the device's firmware
+    if (context_.ecatSlavelist_[device_id].eep_pdi) {
+      uint8 pdi_access = 0;
+      const int wkc =
+          ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPCFG + 1, sizeof(pdi_access), &pdi_access, EC_TIMEOUTRET);
+      if (wkc <= 0 || (pdi_access & 0x01) != 0) {
+        logging::warning(logger_) << "Device id " << device_id
+                                  << ": cannot read the eeprom - the device firmware is accessing it";
+        return EepromReadResult{};
+      }
+    }
+    if (ecx_eeprom2master(&context_.context, device_id) <= 0) {
+      logging::error(logger_) << "Device id " << device_id << ": failed to take control of the eeprom";
+      return EepromReadResult{};
+    }
+
+    std::size_t bytes_read = 0;
+    bool success = true;
+    while (bytes_read < data.size()) {
+      const auto word = static_cast<uint16>(word_address + bytes_read / 2);
+      const std::size_t chunk_read = read_eeprom_chunk(data.subspan(bytes_read), configadr, word);
+      if (chunk_read == 0) {
+        success = false;
+        break;
+      }
+      bytes_read += chunk_read;
+    }
+
+    // Hand the eeprom back to the PDI, where the configuration left it
+    if (ecx_eeprom2pdi(&context_.context, device_id) <= 0) {
+      logging::error(logger_) << "Device id " << device_id << ": failed to hand the eeprom back to the device";
+      success = false;
+    }
+
+    return EepromReadResult{ .success = success, .actual_size_read = bytes_read, .data = data.first(bytes_read) };
+  }
+
   DiagnosticsSnapshot diagnostics(bool force_update)
   {
     if (get_bus_state() == BusState::PreInit || get_bus_state() == BusState::Shutdown) {
@@ -818,6 +921,14 @@ struct EthercatBus::BackendImpl
     return snapshot;
   }
 
+  std::vector<MailboxEvent> pop_mailbox_events()
+  {
+    std::vector<MailboxEvent> queued;
+    std::lock_guard<std::mutex> lock(mailbox_status_mutex_);
+    queued.swap(unsolicited_events_);
+    return queued;
+  }
+
 private:
   // Parameterization
   const Parameters params_;
@@ -830,6 +941,7 @@ private:
   std::vector<uint8_t> io_map_;
   std::atomic<BusState> state_{ BusState::PreInit };
   std::optional<HighPrecisionTimeStamp> activation_start_tp_{};
+  std::optional<HighPrecisionTimeStamp> last_mailbox_poll_tp_{};
 
   // Device management
   std::vector<std::shared_ptr<EthercatDevice>> devices_;
@@ -839,9 +951,16 @@ private:
   // SDO call sync
   std::mutex mailbox_mutex_;
   MailboxStatus mailbox_status_{};
+  // Events no access could be attributed to (mostly emergencies), until pop_mailbox_events() hands them out
+  std::vector<MailboxEvent> unsolicited_events_;
+  static constexpr std::size_t max_unsolicited_events = 64;
   mutable std::mutex mailbox_status_mutex_;
   // State change related
   std::mutex state_mutex_;
+  // EEPROM access
+  std::mutex eeprom_mutex_;
+  // Pause between two polls of the eeprom interface, SOEM's EC_LOCALDELAY which it keeps private
+  static constexpr uint32 eeprom_poll_delay_us = 200;
 
   // Backend logger
   logging::Logger logger_;
@@ -863,12 +982,6 @@ private:
   BusState get_bus_state() const
   {
     return state_;
-  }
-
-  void update_device_states()
-  {
-    std::lock_guard<std::mutex> lock(state_mutex_);
-    ecx_readstate(&context_.context);
   }
 
   std::optional<std::chrono::nanoseconds> internal_pdo_update()
@@ -923,6 +1036,7 @@ private:
     latest_diagnostics_.bus.link_up = nic::is_up(params_.interface);
 
     if (std::unique_lock<std::mutex> lock(mailbox_mutex_, std::try_to_lock); lock.owns_lock()) {
+      poll_mailboxes();
       drain_mailbox_events();
     }
 
@@ -1079,9 +1193,149 @@ private:
         attributed = std::move(ev);
         continue;
       }
-      report_mailbox_event(ev);
+      report_unsolicited_event(std::move(ev));
     }
     return attributed;
+  }
+
+  /// Switches the device's mailbox SyncManagers to the bootstrap mailbox of its SII (word 0x0014, ETG.2000).
+  /// Call with state_mutex_ and mailbox_mutex_ held.
+  bool configure_bootstrap_mailbox(const DeviceId device_id)
+  {
+    std::array<uint8_t, 8> sii{};
+    if (!read_eeprom_untyped(sii, device_id, ECT_SII_BOOTRXMBX)) {
+      logging::error(logger_) << "Device id " << device_id << ": failed to read the bootstrap mailbox from the eeprom";
+      return false;
+    }
+    const auto word = [&sii](std::size_t i) { return static_cast<uint16>(sii[2 * i] | (sii[2 * i + 1] << 8)); };
+    if (word(1) == 0 || word(3) == 0) {
+      logging::error(logger_) << "Device id " << device_id << ": the device does not support the bootstrap state";
+      return false;
+    }
+    auto& slave = context_.ecatSlavelist_[device_id];
+    ec_smt rx{ .StartAddr = htoes(word(0)), .SMlength = htoes(word(1)), .SMflags = slave.SM[0].SMflags };
+    ec_smt tx{ .StartAddr = htoes(word(2)), .SMlength = htoes(word(3)), .SMflags = slave.SM[1].SMflags };
+    if (ecx_FPWR(&context_.ecat_port, slave.configadr, ECT_REG_SM0, sizeof(rx), &rx, EC_TIMEOUTRET) <= 0 ||
+        ecx_FPWR(&context_.ecat_port, slave.configadr, ECT_REG_SM1, sizeof(tx), &tx, EC_TIMEOUTRET) <= 0) {
+      logging::error(logger_) << "Device id " << device_id << ": failed to configure the bootstrap mailbox";
+      return false;
+    }
+    slave.mbx_wo = word(0);
+    slave.mbx_l = word(1);
+    slave.mbx_ro = word(2);
+    slave.mbx_rl = word(3);
+    return true;
+  }
+
+  /// Switches the device's mailbox SyncManagers back to the standard mailbox SOEM configured, if the bootstrap mailbox
+  /// was in use. Call with state_mutex_ and mailbox_mutex_ held.
+  void restore_standard_mailbox(const DeviceId device_id)
+  {
+    auto& slave = context_.ecatSlavelist_[device_id];
+    if (slave.mbx_wo == etohs(slave.SM[0].StartAddr) && slave.mbx_l == etohs(slave.SM[0].SMlength) &&
+        slave.mbx_ro == etohs(slave.SM[1].StartAddr) && slave.mbx_rl == etohs(slave.SM[1].SMlength)) {
+      return;
+    }
+    if (ecx_FPWR(&context_.ecat_port, slave.configadr, ECT_REG_SM0, sizeof(ec_smt), &slave.SM[0], EC_TIMEOUTRET) <= 0 ||
+        ecx_FPWR(&context_.ecat_port, slave.configadr, ECT_REG_SM1, sizeof(ec_smt), &slave.SM[1], EC_TIMEOUTRET) <= 0) {
+      // The device then refuses PreOp with AL status code 0x0016, which the state change reports
+      logging::error(logger_) << "Device id " << device_id << ": failed to restore the standard mailbox";
+      return;
+    }
+    slave.mbx_wo = etohs(slave.SM[0].StartAddr);
+    slave.mbx_l = etohs(slave.SM[0].SMlength);
+    slave.mbx_ro = etohs(slave.SM[1].StartAddr);
+    slave.mbx_rl = etohs(slave.SM[1].SMlength);
+  }
+
+  /// Returns the eeprom status once the current command finished, nothing on a timeout
+  std::optional<uint16> wait_for_eeprom_not_busy(const uint16 configadr)
+  {
+    osal_timert timer;
+    osal_timer_start(&timer, EC_TIMEOUTEEP);
+    do {
+      uint16 status = 0;
+      const int wkc = ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPSTAT, sizeof(status), &status, EC_TIMEOUTRET);
+      status = etohs(status);
+      if (wkc > 0 && (status & EC_ESTAT_BUSY) == 0) {
+        return status;
+      }
+      osal_usleep(eeprom_poll_delay_us);
+    } while (!osal_timer_is_expired(&timer));
+    return std::nullopt;
+  }
+
+  /// Reads the 4 or 8 bytes of one eeprom read command into the front of data, checking every frame unlike
+  /// ecx_readeepromFP. Returns the bytes read, 0 on failure. Call with eeprom_mutex_ held.
+  std::size_t read_eeprom_chunk(std::span<uint8_t> data, const uint16 configadr, const uint16 word)
+  {
+    auto status = wait_for_eeprom_not_busy(configadr);
+    if (!status) {
+      return 0;
+    }
+    // Clear the error bits of an earlier command
+    if ((*status & EC_ESTAT_EMASK) != 0) {
+      uint16 nop = htoes(static_cast<uint16>(EC_ECMD_NOP));
+      if (ecx_FPWR(&context_.ecat_port, configadr, ECT_REG_EEPCTL, sizeof(nop), &nop, EC_TIMEOUTRET) <= 0) {
+        return 0;
+      }
+    }
+    std::array<uint16, 3> command{ htoes(static_cast<uint16>(EC_ECMD_READ)), htoes(word), 0 };
+    if (ecx_FPWR(&context_.ecat_port, configadr, ECT_REG_EEPCTL, sizeof(command), command.data(), EC_TIMEOUTRET) <= 0) {
+      return 0;
+    }
+    status = wait_for_eeprom_not_busy(configadr);
+    if (!status || (*status & EC_ESTAT_NACK) != 0) {
+      return 0;
+    }
+    std::array<uint8_t, 8> raw{};
+    const std::size_t raw_size = (*status & EC_ESTAT_R64) != 0 ? 8 : 4;
+    if (ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPDAT, static_cast<uint16>(raw_size), raw.data(),
+                 EC_TIMEOUTRET) <= 0) {
+      return 0;
+    }
+    const std::size_t chunk = std::min(raw_size, data.size());
+    std::copy_n(raw.begin(), chunk, data.begin());
+    return chunk;
+  }
+
+  bool is_mailbox_polling_enabled() const
+  {
+    return is_diagnostics_enabled(params_.diagnostics.mailbox_diagnostics) &&
+           params_.diagnostics.mailbox_poll_interval > std::chrono::milliseconds{ 0 };
+  }
+
+  /// Reads every input mailbox that holds data, so unsolicited messages such as emergencies
+  /// reach SOEM's error list between accesses. Call with mailbox_mutex_ held.
+  void poll_mailboxes()
+  {
+    if (!is_mailbox_polling_enabled()) {
+      return;
+    }
+    const auto now = HighPrecisionClock::now();
+    if (last_mailbox_poll_tp_ && now - *last_mailbox_poll_tp_ < params_.diagnostics.mailbox_poll_interval) {
+      return;
+    }
+    last_mailbox_poll_tp_ = now;
+
+    // A broadcast read ORs the SyncManager 1 status of all devices, so one frame tells whether any input mailbox is
+    // full (bit 3) - the idle case costs a single frame regardless of the number of devices
+    uint16 status = 0;
+    const int wkc = ecx_BRD(context_.context.port, 0, ECT_REG_SM1STAT, sizeof(status), &status, EC_TIMEOUTRET);
+    if (wkc <= 0 || (etohs(status) & 0x08) == 0) {
+      return;
+    }
+
+    for (uint16 i = 1; i <= static_cast<uint16>(context_.ecatSlavecount_); i++) {
+      if (context_.ecatSlavelist_[i].mbx_rl == 0) {
+        continue;
+      }
+      // Timeout 0 makes ecx_mbxreceive read the status and the mailbox once: with a timeout it keeps reading the
+      // emptied mailbox after an emergency, and the repeat requests that triggers deliver the emergency again
+      ec_mbxbuft mbx;
+      ec_clearmbx(&mbx);
+      ecx_mbxreceive(&context_.context, i, &mbx, 0);
+    }
   }
 
   /// Unattributed drain - clears stale entries so the next access starts clean,
@@ -1090,8 +1344,20 @@ private:
   {
     ec_errort raw{};
     while (ecx_poperror(&context_.context, &raw)) {
-      report_mailbox_event(make_mailbox_event(raw));
+      report_unsolicited_event(make_mailbox_event(raw));
     }
+  }
+
+  /// Reports an event nobody receives as an access result and keeps it for pop_mailbox_events()
+  void report_unsolicited_event(MailboxEvent ev)
+  {
+    report_mailbox_event(ev);
+    std::lock_guard<std::mutex> lock(mailbox_status_mutex_);
+    if (unsolicited_events_.size() == max_unsolicited_events) {
+      unsolicited_events_.erase(unsolicited_events_.begin());
+      mailbox_status_.mailbox_events_dropped += 1;
+    }
+    unsolicited_events_.push_back(std::move(ev));
   }
 
   void report_mailbox_event(const MailboxEvent& ev)
@@ -1119,8 +1385,8 @@ private:
     if (!is_diagnostics_enabled(params_.diagnostics.mailbox_diagnostics)) {
       return;
     }
-    // Emergencies are the one kind nobody can observe from a result struct,
-    // so log them at Basic; the rest only under Tracing.
+    // Emergencies are the one kind no result struct carries, so log them at Basic;
+    // the rest only under Tracing.
     const bool always_log = ev.kind == MailboxEventKind::Emergency;
     if (!always_log && params_.diagnostics.mailbox_diagnostics != DiagnosticsLevel::Tracing) {
       return;
@@ -1153,7 +1419,8 @@ private:
       return { std::move(event), event && event->severity == MailboxEventSeverity::Error };
     }
     if (event) {
-      report_mailbox_event(*event);
+      // The result carries the FoE code instead, so the event is handed out through pop_mailbox_events()
+      report_unsolicited_event(std::move(*event));
     }
     // A decoded FoE code is more specific than anything the drain could have found.
     event = make_foe_event(acc.device_id, wkc);
@@ -1402,6 +1669,13 @@ bool EthercatBus::change_device_state(const DeviceId device_id, const EthercatDe
 {
   // Convert into soem internal type
   const auto soem_state = map_to_soem_device_state(target_state);
+  if (device_id != 0 && !impl_->has_device_on_bus(device_id)) {
+    logging::warning(logger_) << "Cannot change device target state - device not on bus: " << device_id;
+    return false;
+  }
+  // The timeout depends on the transition, so the current state is needed
+  impl_->update_device_states();
+  const auto timeout = transition_timeout(impl_->get_parameters(), impl_->get_device_state(device_id), soem_state);
   // Request the state change
   bool res = impl_->set_device_target_state(device_id, soem_state);
   if (!res) {
@@ -1413,7 +1687,7 @@ bool EthercatBus::change_device_state(const DeviceId device_id, const EthercatDe
     return res;
   }
 
-  const bool success = impl_->wait_for_device_target_state(device_id, soem_state);
+  const bool success = impl_->wait_for_device_target_state(device_id, soem_state, timeout);
   if (!success) {
     logging::warning(logger_) << "Device went not into desired target state within timeout" << std::endl;
   }
@@ -1430,6 +1704,12 @@ RegisterWriteResult EthercatBus::write_register_untyped(std::span<const uint8_t>
                                                         const RegisterAddress address)
 {
   return impl_->write_register_untyped(data, device_id, address);
+}
+
+EepromReadResult EthercatBus::read_eeprom_untyped(std::span<uint8_t> data, const DeviceId device_id,
+                                                  const EepromWordAddress word_address)
+{
+  return impl_->read_eeprom_untyped(data, device_id, word_address);
 }
 
 template <EthercatValueType T>
@@ -1487,6 +1767,11 @@ template bool EthercatBus::register_write<double>(DeviceId, RegisterAddress, con
 DiagnosticsSnapshot EthercatBus::diagnostics(bool force_update)
 {
   return impl_->diagnostics(force_update);
+}
+
+std::vector<MailboxEvent> EthercatBus::pop_mailbox_events()
+{
+  return impl_->pop_mailbox_events();
 }
 
 // Dispatch functions into a specific ethercat device

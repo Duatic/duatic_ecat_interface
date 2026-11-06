@@ -88,8 +88,10 @@ using EthercatDevicePtr = std::shared_ptr<EthercatDevice>;
  * write_register_untyped(...)                       | thread safe
  * register_read<T>(...)                             | thread safe
  * register_write<T>(...)                            | thread safe
+ * read_eeprom_untyped(...)                          | thread safe
  * diagnostics(force_update = false)                 | thread safe
  * diagnostics(force_update = true)                  | not thread safe
+ * pop_mailbox_events()                              | thread safe
  * list_interfaces() (static)                        | not thread safe
  * used_backend() (static)                           | thread safe
  */
@@ -110,9 +112,18 @@ public:
     std::chrono::nanoseconds dc_sync0_shift{};
     std::chrono::nanoseconds master_send_offset{};
 
-    // Time to wait for all devices to reach operational state
-    // A value of 0 will disable the timeout
-    std::chrono::milliseconds timeout_transition_operational{ 1000 };
+    // State transition timeouts, named after the ESI's StateMachine/Timeout elements (ETG.2000) they correspond to
+    // SafeopOpTimeout: SafeOp -> Op and PreOp -> SafeOp, the DuaDrive's value. 0 disables the SafeOp -> Op timeout
+    std::chrono::milliseconds timeout_transition_operational{ 9000 };
+    // PreopTimeout: Init -> PreOp/Boot
+    std::chrono::milliseconds timeout_transition_preop{ 3000 };
+    // BackToInitTimeout: any state -> Init and Op/SafeOp -> PreOp
+    std::chrono::milliseconds timeout_transition_back_to_init{ 5000 };
+    // BackToSafeopTimeout: Op -> SafeOp
+    std::chrono::milliseconds timeout_transition_back_to_safeop{ 200 };
+
+    // Devices the network has to consist of, compared during initialize(); empty accepts any network
+    std::vector<ExpectedDevice> expected_devices{};
 
     // Configure various diagnostic options related to the bus
     DiagnosticsOptions diagnostics{};
@@ -318,12 +329,28 @@ public:
   bool register_write(const DeviceId device_id, const RegisterAddress address, const T data);
 
   /**
+   * @brief read_eeprom_untyped - perform a blocking read of the device's EEPROM (SII), starting at a word address
+   * Fails while the device's firmware accesses the EEPROM. data.size() must be even
+   * @note thread safe
+   */
+  EepromReadResult read_eeprom_untyped(std::span<uint8_t> data, const DeviceId device_id,
+                                       const EepromWordAddress word_address);
+
+  /**
    * @brief diagnostics - obtain a diagnostics snapshot of the current bus state
    * These are mostly accumulated diagnostics data
    * @param force_update - instead of obtaining a passive diagnostics snapshop actively read diagnostics now
    * @note only threadsafe if force_update = false
    */
   DiagnosticsSnapshot diagnostics(bool force_update = false);
+
+  /**
+   * @brief pop_mailbox_events - obtain the mailbox events no access was attributed to (mostly emergencies)
+   * @return the events since the last call, oldest first and at most 64 - older ones are counted in
+   * MailboxStatus::mailbox_events_dropped
+   * @note thread safe
+   */
+  std::vector<MailboxEvent> pop_mailbox_events();
 
   /**
    * @brief list_interface - provide a list with all supported interface names

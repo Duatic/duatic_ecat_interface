@@ -33,6 +33,7 @@
 
 #include <string>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <vector>
 #include <ostream>
@@ -66,9 +67,12 @@ struct DiagnosticsOptions
 
   // PDO related basic diagnostics such as WKC mismatcheds, lost frames, and total frames sent
   DiagnosticsLevel pdo_diagnostics{ DiagnosticsLevel::Basic };
-  // All mailbox related functions (e.g. SDO...)
+  // Mailbox logging (Basic: emergencies, Tracing: every event) and the polling of the input mailboxes for emergencies
+  // in update_service() - Off disables the polling, unsolicited messages then only arrive during accesses
   // Please note mailbox diagnostics related types are in the "types.hpp" header
   DiagnosticsLevel mailbox_diagnostics{ DiagnosticsLevel::Basic };
+  // How often update_service() polls the input mailboxes, 0 disables the polling
+  std::chrono::milliseconds mailbox_poll_interval{ 100 };
   // Diagnostics related to esc (this is mostly tracking state changes of an esc)
   DiagnosticsLevel esc_diagnostics{ DiagnosticsLevel::Off };
   // Diagnostics related to every port of an esc (very expensive diagnostics)
@@ -215,12 +219,14 @@ struct BusStatus
 
 // Cumulative mailbox event counters (CoE/FoE/SoE aborts, timeouts, emergencies), accumulated for
 // the entire lifetime of the owning EthercatBus instance (same never-reset semantics as
-// BusStatus's counters above).
+// BusStatus's counters above). Every event is counted, independent of the mailbox_diagnostics level.
 struct MailboxStatus
 {
   uint64_t mailbox_aborts = 0;
   uint64_t mailbox_timeouts = 0;
   uint64_t mailbox_emergencies = 0;
+  // Events dropped from the full EthercatBus::pop_mailbox_events() queue
+  uint64_t mailbox_events_dropped = 0;
 };
 
 struct ExecutorTimingDiagnostics
