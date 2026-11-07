@@ -6,7 +6,7 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_ros REQUIRED)
 
 set(PACKAGE_DEPENDENCIES
-  soem_vendor
+  duatic_soem_vendor
   #etherlab_master_vendor
   duatic_message_logger
 )
@@ -29,7 +29,7 @@ target_include_directories(duatic_ecat_interface PUBLIC
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
 
 
-target_link_libraries(duatic_ecat_interface duatic_message_logger::duatic_message_logger soem_vendor::soem_vendor)
+target_link_libraries(duatic_ecat_interface duatic_message_logger::duatic_message_logger duatic_soem_vendor::duatic_soem_vendor)
 # enable additional warnings
 target_compile_options(duatic_ecat_interface PRIVATE
   -Wall

@@ -29,7 +29,7 @@ All dependencies with their corresponding version are listed in the [repos.list]
 
 | Name | Description | License
 | ---  | --- | --- |
-| [soem_vendor](https://github.com/Duatic/soem_vendor) | SOEM ROS vendor package | BSD-3-Clause, GPLv2 with Linktime exception |
+| [duatic_soem_vendor](https://github.com/Duatic/soem_vendor) | SOEM as a plain C library | BSD-3-Clause, GPLv2 with Linktime exception |
 | [duatic_message_logger](https://github.com/Duatic/duatic_message_logger) | Logging library which allows logging with and without ROS | BSD-3-Clause |
 | [cxxopts](https://github.com/jarro2783/cxxopts) | Modern C++ CLI interface library | MIT |
 

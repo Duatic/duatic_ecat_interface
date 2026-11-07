@@ -32,7 +32,7 @@
 
 #pragma once
 
-#include <soem_vendor/ethercat.h>
+#include <duatic_soem_vendor/ethercat.h>
 
 #include <cstdint>
 
