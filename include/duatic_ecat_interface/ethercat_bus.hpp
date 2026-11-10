@@ -170,6 +170,7 @@ public:
   /**
    * @brief startup - next step after initialize
    * This configures the PDO mapping of all devices on the bus
+   * @note the devices remain in PRE_OP until activate()
    * @note afterwards no additional device can be added
    * @note not thread safe
    */

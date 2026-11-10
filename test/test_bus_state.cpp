@@ -81,3 +81,17 @@ TEST(TransitionTimeout, DisabledOperationalTimeoutKeepsPreopToSafeopBounded)
   params.timeout_transition_operational = milliseconds{ 0 };
   EXPECT_EQ(transition_timeout(params, EC_STATE_PRE_OP, EC_STATE_SAFE_OP), milliseconds{ 10000 });
 }
+
+TEST(Remaining, IsTheTimeLeftUntilTheDeadlineRoundedUp)
+{
+  const auto now = HighPrecisionClock::now();
+  EXPECT_EQ(remaining(now + milliseconds{ 5 }, now), milliseconds{ 5 });
+  EXPECT_EQ(remaining(now + std::chrono::microseconds{ 4500 }, now), milliseconds{ 5 });
+}
+
+TEST(Remaining, IsZeroOnceTheDeadlinePassed)
+{
+  const auto now = HighPrecisionClock::now();
+  EXPECT_EQ(remaining(now, now), milliseconds{ 0 });
+  EXPECT_EQ(remaining(now - milliseconds{ 5 }, now), milliseconds{ 0 });
+}

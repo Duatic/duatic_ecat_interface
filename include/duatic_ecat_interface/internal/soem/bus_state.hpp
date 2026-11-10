@@ -144,4 +144,14 @@ inline std::chrono::milliseconds transition_timeout(const EthercatBus::Parameter
       return params.timeout_transition_back_to_init;
   }
 }
+
+// Time left until the deadline of a transition (ETG.2000: timeouts count from the request), 0 once it has passed
+inline std::chrono::milliseconds remaining(const HighPrecisionClock::time_point deadline,
+                                           const HighPrecisionClock::time_point now = HighPrecisionClock::now())
+{
+  if (deadline <= now) {
+    return std::chrono::milliseconds{ 0 };
+  }
+  return std::chrono::ceil<std::chrono::milliseconds>(deadline - now);
+}
 }  // namespace duatic::ecat_interface::internal::soem

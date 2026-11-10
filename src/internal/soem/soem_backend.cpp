@@ -94,7 +94,12 @@ struct EthercatBus::BackendImpl
       throw BackendError("Failed to open interface: " + params_.interface + " Run as root!", Backend::SOEM, ec);
     }
 
-    // This discovers devices
+    // The master requests every ESM transition itself so that each one is timed from its request (ETG.2000) and
+    // SafeOp is only requested once DC is configured - otherwise SOEM requests PreOp and SafeOp implicitly
+    context_.context.manualstatechange = 1;
+
+    // This discovers devices - it requests Init from all devices by a broadcast first
+    const auto init_request_tp = HighPrecisionClock::now();
     const int device_count = ecx_config_init(&context_.context, FALSE);
     if (device_count <= 0) {
       throw BackendError("No devices found on the bus", Backend::SOEM, device_count);
@@ -141,6 +146,14 @@ struct EthercatBus::BackendImpl
 
     update_bus_state(BusState::Initialized);
 
+    // ecx_config_init() does not evaluate whether the devices reached Init
+    if (!wait_for_device_target_state(
+            0, ec_state::EC_STATE_INIT, remaining(init_request_tp + params_.timeout_transition_back_to_init))) {
+      shutdown();
+      throw BackendError("Devices did not reach 'INIT' state - aborting initialization", Backend::SOEM);
+    }
+
+    // The identification is compared while the devices are in Init (ETG.1000.5 slave handler)
     if (const auto mismatches = compare_network(params_.expected_devices, scan()); !mismatches.empty()) {
       std::string description = "The network does not match the configured network:";
       for (const auto& mismatch : mismatches) {
@@ -151,8 +164,9 @@ struct EthercatBus::BackendImpl
       throw BackendError(description, Backend::SOEM);
     }
 
-    // ecx_config_init() requested PreOp but does not wait for it
-    if (!wait_for_device_target_state(0, ec_state::EC_STATE_PRE_OP, params_.timeout_transition_preop)) {
+    const auto preop_deadline = HighPrecisionClock::now() + params_.timeout_transition_preop;
+    if (!set_device_target_state(0, ec_state::EC_STATE_PRE_OP) ||
+        !wait_for_device_target_state(0, ec_state::EC_STATE_PRE_OP, remaining(preop_deadline))) {
       shutdown();
       throw BackendError("Devices did not reach 'PRE_OP' state - aborting initialization", Backend::SOEM);
     }
@@ -391,9 +405,12 @@ struct EthercatBus::BackendImpl
     // Reset activation timestamp (needed in case of bus restart)
     activation_start_tp_ = std::nullopt;
 
-    // Now put all devices into safeop first (this is timewise non critical)
+    // Now put all devices into safeop first (this is timewise non critical). This is the only SafeOp request: the
+    // devices stay in PreOp until here, so the pdo mapping and the dc configuration are complete beforehand
 
-    // First we request it from every slave
+    // First we request it from every slave - all requests go out together and share one deadline
+    const auto safeop_deadline =
+        HighPrecisionClock::now() + transition_timeout(params_, ec_state::EC_STATE_PRE_OP, ec_state::EC_STATE_SAFE_OP);
     for (auto& device : devices_) {
       if (!set_device_target_state(device->get_device_id(), ec_state::EC_STATE_SAFE_OP)) {
         // Shutdown should handle a safe exit in all situations and bus states
@@ -403,11 +420,13 @@ struct EthercatBus::BackendImpl
     }
     // Now we wait for all slaves to reach it
     for (auto& device : devices_) {
-      if (!wait_for_device_target_state(
-              device->get_device_id(), ec_state::EC_STATE_SAFE_OP,
-              transition_timeout(params_, ec_state::EC_STATE_PRE_OP, ec_state::EC_STATE_SAFE_OP))) {
+      if (!wait_for_device_target_state(device->get_device_id(), ec_state::EC_STATE_SAFE_OP,
+                                        remaining(safeop_deadline))) {
+        const auto device_id = device->get_device_id();
         shutdown();
-        throw BackendError("Device did not reach 'SAFE_OP' state - aborting activation", Backend::SOEM);
+        throw BackendError("Device " + std::to_string(device_id) +
+                               " did not reach 'SAFE_OP' state - aborting activation",
+                           Backend::SOEM);
       }
     }
 
