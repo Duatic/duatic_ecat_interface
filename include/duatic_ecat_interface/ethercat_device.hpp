@@ -47,6 +47,11 @@
 namespace duatic::ecat_interface
 {
 
+/**
+ * @brief EthercatDevice - per device access to a device on an EthercatBus
+ * The get_/set_ pdo accessors work on the device's cached pdo copy, which the bus exchanges with its process image
+ * (read_/write_ on the bus) in every update
+ */
 class EthercatDevice
 {
 public:
@@ -94,7 +99,7 @@ public:
   }
 
   /**
-   * @brief on_pre_startup - before the bus pdo mapping / dc will be configured
+   * @brief on_startup - in startup(), before the bus pdo mapping / dc will be configured (devices are in PRE_OP)
    */
   void on_startup()
   {
@@ -104,8 +109,8 @@ public:
   }
 
   /**
-   * @brief on_pre_activate - before all devices are put into operational state but after bus pdo mapping has been
-   * configured
+   * @brief on_pre_activate - in activate(), before SAFE_OP is requested from the devices (pdo mapping and dc are
+   * configured)
    */
   void on_pre_activate()
   {
@@ -115,7 +120,8 @@ public:
   }
 
   /**
-   * @brief on_pre_activate - after all devices have been put into operational
+   * @brief on_post_activate - in activate(), after all devices reached SAFE_OP - the transition to OPERATIONAL
+   * follows once the bus is spun
    */
   void on_post_activate()
   {
@@ -170,7 +176,7 @@ public:
   }
 
   /**
-   * @brief on_pdo_configured - callback which gets called as soon as the pdos has been setup and configured inn the
+   * @brief on_pdo_configured - callback which gets called as soon as the pdos has been setup and configured in the
    * backend
    */
   void on_pdo_configured([[maybe_unused]] std::size_t configured_rx_pdo_size,
@@ -214,8 +220,8 @@ public:
   ObjectDictionary read_od(bool full_read = false) const;
 
   /**
-   * @brief echange_device_state - try to enforce a state transition of the specified device into the specified state
-   * @param blocking - if true wait for a certain amount of time (determined by the backend) for the transistion to
+   * @brief change_device_state - try to enforce a state transition of the specified device into the specified state
+   * @param blocking - if true wait for a certain amount of time (determined by the backend) for the transition to
    * finish
    * @return true in case of success
    * @note not thread safe
@@ -223,12 +229,12 @@ public:
   bool change_device_state(const EthercatDeviceState target_state, bool blocking = true);
   /**
    * @brief foe_write - perform a file write via ethercat
-   * @note not thread safe
+   * @note thread safe
    */
   FoEWriteResult foe_write(const std::string& file_name, std::span<const uint8_t> data);
   /**
    * @brief foe_read - perform a file read via ethercat
-   * @note not thread safe
+   * @note thread safe
    */
   FoEReadValue foe_read(const std::string& file_name, std::span<uint8_t> buffer);
 
@@ -268,7 +274,7 @@ public:
   }
 
   /**
-   * @brief Access the latest received TX PDO (tx == data the device sends the the maste receives)
+   * @brief Access the latest received TX PDO (tx == data the device sends the master receives)
    * @note this function is fully thread safe and does not block the bus. The data is copied from the bus at the
    * update_read call
    */
@@ -318,7 +324,7 @@ public:
   }
 
   /**
-   * @brief Access the latest received TX PDO (tx == data the device sends the the maste receives)
+   * @brief Access the latest received TX PDO (tx == data the device sends the master receives)
    * @note this function is fully thread safe and does not block the bus. The data is copied from the bus at the
    * update_read call
    */

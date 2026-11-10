@@ -43,7 +43,7 @@ namespace duatic::ecat_interface
 
 /**
  * ValueDiagnosticsWrapper - a wrapper around a read value<T> together with additional diagnostics data
- * @note even if the read was successfull there might not necessarily be a value inside
+ * @note even if the read was successful there might not necessarily be a value inside
  */
 template <typename T, typename DiagnosticsT>
 class [[nodiscard]] ValueDiagnosticsWrapper

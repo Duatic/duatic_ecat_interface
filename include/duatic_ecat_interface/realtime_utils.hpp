@@ -45,11 +45,11 @@ namespace duatic::ecat_interface
  * @brief set_realtime_priority - try to configure the passed thread to have higher priorities and behave more rt
  * capable therefore
  * @param thread - the thread to configure
- * @param priority - the thread prioty between [1-99] with 99 beeing the highest priority
- * @param cpu_coure - the cpu core to tie this thread to. Pass -1 to keep the default
+ * @param priority - the thread priority between [1-99] with 99 being the highest priority
+ * @param cpu_core - the cpu core to tie this thread to. Pass -1 to keep the default
  * @param scheduler - the scheduler type to choose for this thread. Reasonable options are [SCHED_FIFO, SCHED_RR]
  *
- * This function tries to make the passed thread more realtimy by doing three things:
+ * This function tries to make the passed thread more realtime capable by doing three things:
  * 1. Configure the scheduler to a more realtime like scheduler. E.g. SCHED_FIFO
  * 2. Increase the priority of the thread
  * 3. Bind the thread to a specific core. This avoids overhead by moving the thread between cores (cache misses)
@@ -101,7 +101,7 @@ inline bool set_realtime_priority(pthread_t thread, int priority = 60, int cpu_c
 
 /**
  * @brief set_realtime_priority - variant which configures the current thread
- * See set_realtime_priority with pthread parameter for the full explaination
+ * See set_realtime_priority with pthread parameter for the full explanation
  */
 inline bool set_realtime_priority(int priority = 60, int cpu_core = -1, int scheduler = SCHED_FIFO)
 {

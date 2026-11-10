@@ -38,12 +38,13 @@ namespace duatic::ecat_interface
 {
 
 /**
- * @brief Idenditier for the active (compiled in backend)
+ * @brief Identifier of the active (compiled in) backend
  */
 enum class Backend
 {
   Unknown = 0,
   SOEM = 1,
+  // Reserved for an Etherlab backend, not implemented yet
   Etherlab = 2
 };
 

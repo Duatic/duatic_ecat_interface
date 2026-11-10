@@ -185,7 +185,7 @@ struct EthercatBus::BackendImpl
   std::shared_ptr<EthercatDevice> acquire_device(const DeviceId device_id)
   {
     if (get_bus_state() != BusState::Initialized) {
-      throw BackendError("You may only aquire devices in the bus state: 'Initialized'", Backend::SOEM);
+      throw BackendError("You may only acquire devices in the bus state: 'Initialized'", Backend::SOEM);
     }
     if (!has_device(device_id)) {
       throw DeviceNotFound("Device with id: " + std::to_string(device_id) + " not found on the bus", Backend::SOEM);
@@ -195,7 +195,7 @@ struct EthercatBus::BackendImpl
                                      [device_id](const auto& d) { return d->get_device_id() == device_id; });
 
     if (device == devices_.end()) {
-      throw BackendError("Backend error - inconstent device states in list", Backend::SOEM);
+      throw BackendError("Backend error - inconsistent device states in list", Backend::SOEM);
     }
 
     return *device;
@@ -437,7 +437,7 @@ struct EthercatBus::BackendImpl
     // Bus is now in activated state so the update method knows that it needs to push devices into OPERATIONAL first
     update_bus_state(BusState::Activated);
 
-    // Give the devices the chance to perfrom any last steps before the operational stage starts
+    // Give the devices the chance to perform any last steps before the operational stage starts
     for (auto& device : devices_) {
       device->on_post_activate();
     }
@@ -1670,7 +1670,7 @@ SDOReadValue<T> EthercatBus::sdo_read(const DeviceId device_id, const SDOIndex i
   std::span<uint8_t> buffer(reinterpret_cast<uint8_t*>(&data), sizeof(T));
 
   const auto result = read_sdo_untyped(buffer, device_id, index, sub_index);
-  // Read was not successfull
+  // Read was not successful
   if (!result) {
     return SDOReadValue<T>(result);
   }
@@ -1683,7 +1683,7 @@ SDOReadValue<std::string> EthercatBus::sdo_read<std::string>(const DeviceId devi
 {
   // Create a buffer of the maximum possible string length
   std::vector<char> data(maximum_visible_string_size, 0);
-  // Create a uin8t_t span reprensentation of it
+  // Create a uint8_t span representation of it
   std::span<uint8_t> buffer(reinterpret_cast<uint8_t*>(data.data()), data.size());
   const auto result =
       read_sdo_untyped(buffer, device_id, index, sub_index, false /*do not perform size check for string reads*/);

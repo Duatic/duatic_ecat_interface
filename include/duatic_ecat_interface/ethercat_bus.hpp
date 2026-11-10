@@ -57,10 +57,20 @@ using EthercatDevicePtr = std::shared_ptr<EthercatDevice>;
  * @note all non-rt critical function can throw
  * @note All functions that are marked as "not thread safe" may not be called from multiple different threads at the
  * same time
+ * @note "Ethercat" (not "EtherCAT") is the spelling used throughout this library's identifiers
+ *
+ *  @par Conventions
+ * - Typed accesses are named object first (sdo_read<T>, register_write<T>, foe_write), untyped buffer accesses
+ *   verb first with an "_untyped" suffix (read_sdo_untyped, read_register_untyped)
+ * - Arguments: the device id first, then for typed writes the value, then the addressing (index/subindex,
+ *   register or eeprom address). Untyped accesses take the buffer first
+ * - read_/write_ on the bus copy from/to the process image, get_/set_ on an EthercatDevice access its cached copy
+ *
  *  @par Thread-safety summary
  * Function                                          | Thread safety
  * --------------------------------------------------| -------------------------------------------
  * initialize()                                      | not thread safe
+ * acquire_device(device_id)                         | not thread safe
  * scan()                                            | not thread safe
  * scan(device_id)                                   | thread safe
  * read_od(device_id, full_read)                     | not thread safe
@@ -92,7 +102,7 @@ using EthercatDevicePtr = std::shared_ptr<EthercatDevice>;
  * diagnostics(force_update = false)                 | thread safe
  * diagnostics(force_update = true)                  | not thread safe
  * pop_mailbox_events()                              | thread safe
- * list_interfaces() (static)                        | not thread safe
+ * list_interfaces() (static)                        | thread safe
  * used_backend() (static)                           | thread safe
  */
 class EthercatBus final
@@ -142,7 +152,7 @@ public:
   int initialize();
 
   /**
-   * @brief acquire_device - obtain a reference to the underlaying ethercat device
+   * @brief acquire_device - obtain a reference to the underlying ethercat device
    * @return shared ptr to the device
    * @note not thread safe
    */
@@ -154,7 +164,7 @@ public:
    */
   std::vector<DeviceInfo> scan();
   /**
-   * @brief scan - check if a specific device is on the bus and provide the full information about that bus
+   * @brief scan - check if a specific device is on the bus and provide the full information about that device
    * @throws DeviceNotFound in case device was not found on the bus
    * @note thread safe
    */
@@ -198,6 +208,8 @@ public:
    * @brief update_service - perform a single bus update step of the servicing thread
    * @note thread safe
    * @note both update_service and update_rt need to be called on a regular base
+   * @return false once no further service updates are needed: in 'Operational' state while neither the mailbox nor the
+   * esc / esc port diagnostics are enabled
    */
   bool update_service();
 
@@ -212,7 +224,8 @@ public:
    * @brief Check if the bus manages a specific device
    * @param device_id - the id (bus address) of the device you are looking for
    * @return true in case the bus manages that specific device
-   * @note this checks if the device is _managed_ by this bus instance object (has been added via attach device)
+   * @note this checks if the device is _managed_ by this bus instance object (an EthercatDevice exists for it,
+   * initialize() creates one for every device found on the bus)
    * @note thread safe
    */
   bool has_device(const DeviceId device_id) const;
@@ -229,20 +242,20 @@ public:
   // Untyped functions for reading writing SDOs
   // Blocking
   /**
-   * @brief read_sdo_untyped - perfrom a blocking read for the specified sdo into the given buffer
+   * @brief read_sdo_untyped - perform a blocking read for the specified sdo into the given buffer
    * @throws DeviceNotFound if the device is not on the bus
    * @throws BackendError if the bus is not initialized yet
    * @note thread safe
-   * @note you can also read from devices which have not been added via "attach_device"
+   * @note this works for every device on the bus, also before an EthercatDevice was acquired for it
    */
   SDOReadResult read_sdo_untyped(std::span<uint8_t> data, const DeviceId device_id, const SDOIndex index,
                                  const SDOSubIndex sub_index, bool check_size = true);
   /**
-   * @brief write_sdo_untyped - pefrom a blocking write to the specified sdo from the given buffer
+   * @brief write_sdo_untyped - perform a blocking write to the specified sdo from the given buffer
    * @throws DeviceNotFound if the device is not on the bus
    * @throws BackendError if the bus is not initialized yet
    * @note thread safe
-   * @note you can also write to devices which have not been added via "attach_device"
+   * @note this works for every device on the bus, also before an EthercatDevice was acquired for it
    */
   SDOWriteResult write_sdo_untyped(std::span<const uint8_t> data, const DeviceId device_id, const SDOIndex index,
                                    const SDOSubIndex sub_index);
@@ -295,7 +308,7 @@ public:
 
   /**
    * @brief change_device_state - try to start a state transition of the specified device into the specified state
-   * @param blocking - if true wait for a certain amount of time (determined by the backend) for the transistion to
+   * @param blocking - if true wait for a certain amount of time (determined by the backend) for the transition to
    * finish
    * @return true in case of success
    * @note not thread safe
@@ -319,7 +332,7 @@ public:
   RegisterReadResult read_register_untyped(std::span<uint8_t> data, const DeviceId device_id,
                                            const RegisterAddress address, bool check_size = true);
   /**
-   * @brief write_register_untyped - perform a blocking read to the specified ESC register
+   * @brief write_register_untyped - perform a blocking write to the specified ESC register
    * @note thread safe
    */
   RegisterWriteResult write_register_untyped(std::span<const uint8_t> data, const DeviceId device_id,
@@ -341,7 +354,7 @@ public:
   /**
    * @brief diagnostics - obtain a diagnostics snapshot of the current bus state
    * These are mostly accumulated diagnostics data
-   * @param force_update - instead of obtaining a passive diagnostics snapshop actively read diagnostics now
+   * @param force_update - instead of obtaining a passive diagnostics snapshot actively read diagnostics now
    * @note only threadsafe if force_update = false
    */
   DiagnosticsSnapshot diagnostics(bool force_update = false);
@@ -355,14 +368,14 @@ public:
   std::vector<MailboxEvent> pop_mailbox_events();
 
   /**
-   * @brief list_interface - provide a list with all supported interface names
+   * @brief list_interfaces - provide a list with all supported interface names
    * @return list of strings of the interface names
    * @note thread safe
    */
   static std::vector<std::string> list_interfaces();
   /**
    * @brief used_backend - obtain the configured and used backend implementation identifier
-   * @note this is mostly for debugging and identification purpouses
+   * @note this is mostly for debugging and identification purposes
    * @note thread safe
    */
   static Backend used_backend();
@@ -373,7 +386,7 @@ private:
   std::unique_ptr<BackendImpl> impl_;
   logging::Logger logger_;
 
-  // Dispatch functions we keep here in order to have a better access modell in the EthercatDevice classes
+  // Dispatch functions we keep here in order to have a better access model in the EthercatDevice classes
   void dispatch_device_update_write(EthercatDevice& device, const HighPrecisionTimeStamp& tp);
   void dispatch_device_update_read(EthercatDevice& device, const HighPrecisionTimeStamp& tp);
 };

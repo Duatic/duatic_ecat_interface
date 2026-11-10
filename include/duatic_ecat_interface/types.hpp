@@ -169,6 +169,7 @@ using RegisterReadValue = ValueDiagnosticsWrapper<T, RegisterReadResult>;
 // EEPROM (SII) access types, the EEPROM is addressed in 16 bit words
 using EepromWordAddress = uint16_t;
 
+// Unlike the other results there is no working counter: an eeprom read is a sequence of several register accesses
 struct EepromReadResult
 {
   bool success{ false };
@@ -273,6 +274,7 @@ struct MailboxEvent
 };
 
 // Types for SDO (ServiceDataObject) interactions
+// The read data is in the buffer passed by the caller, so unlike the register / eeprom results there is no data span
 struct SDOReadResult
 {
   bool success{ false };
@@ -333,7 +335,7 @@ inline std::ostream& operator<<(std::ostream& os, const SDOObjectCode code)
   return os << to_string(code);
 }
 
-// Reprensation of supported data types
+// Representation of supported data types - the enumerators keep the ETG.1000.6 / ETG.1020 data type names
 enum class DataType : uint16_t
 {
   UNKNOWN = 0x0000,

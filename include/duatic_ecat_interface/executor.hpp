@@ -56,7 +56,9 @@ struct ExecutorParameters
 
 /**
  * @brief SingleBusExecutor - an executor which performs the rate limited update on one bus
- * objects
+ * A realtime thread calls EthercatBus::update_rt() every cycle, a service thread calls EthercatBus::update_service()
+ * @note the executor owns the end of the bus lifecycle: stop() - and therefore the destructor - shuts the bus down,
+ * although initialize() / startup() / activate() are called by the user
  */
 class SingleBusExecutor
 {
@@ -75,8 +77,8 @@ public:
   }
 
   /**
-   * @brief spin - Start to spin (call update) on all given bus instances
-   * @note this will shutdown the bus instances at exit
+   * @brief spin - start spinning (calling the updates of) the bus
+   * @note the bus is shut down once the executor stops, see stop()
    */
   void spin()
   {
@@ -119,12 +121,12 @@ public:
       } catch (std::exception& ex) {
         logging::fatal(logger_) << "Caught exception in RT thread: " << ex.what();
         rt_error_ptr_ = std::current_exception();
-        rt_error_ocurred_.store(true, std::memory_order_release);
+        rt_error_occurred_.store(true, std::memory_order_release);
         rt_thread_diagnostics_.is_running = false;
       } catch (...) {
         logging::fatal(logger_) << "Caught unknown exception in RT thread";
         rt_error_ptr_ = std::current_exception();
-        rt_error_ocurred_.store(true, std::memory_order_release);
+        rt_error_occurred_.store(true, std::memory_order_release);
         rt_thread_diagnostics_.is_running = false;
       }
     });
@@ -139,7 +141,7 @@ public:
         while (!stoken.stop_requested()) {
           const auto start = HighPrecisionClock::now();
           if (!bus_->update_service()) {
-            // They bus can indicate that no service spin is needed anymore
+            // The bus can indicate that no service spin is needed anymore
             logging::info(logger_) << "Bus indicated that service thread is not needed anymore - stopping";
             break;
           }
@@ -152,12 +154,12 @@ public:
       } catch (std::exception& ex) {
         logging::fatal(logger_) << "Caught exception in Service thread: " << ex.what();
         service_error_ptr_ = std::current_exception();
-        service_error_ocurred_.store(true, std::memory_order_release);
+        service_error_occurred_.store(true, std::memory_order_release);
         service_thread_diagnostics_.is_running = false;
       } catch (...) {
         logging::fatal(logger_) << "Caught unknown exception in Service thread";
         service_error_ptr_ = std::current_exception();
-        service_error_ocurred_.store(true, std::memory_order_release);
+        service_error_occurred_.store(true, std::memory_order_release);
         service_thread_diagnostics_.is_running = false;
       }
 
@@ -166,7 +168,7 @@ public:
   }
 
   /**
-   * @brief stop - Stop spinning the given bus instances
+   * @brief stop - stop spinning the bus and shut it down
    */
   void stop()
   {
@@ -187,7 +189,7 @@ public:
   }
 
   /**
-   * @brief full_diagnostics - obtain a full diagnostics snapshot of the ethercat bus and icnlude executor diagnostics
+   * @brief full_diagnostics - obtain a full diagnostics snapshot of the ethercat bus and include executor diagnostics
    * @note see @ref EthercatBus::diagnostics for parameter meaning
    */
   DiagnosticsSnapshot full_diagnostics(bool force_update = false)
@@ -200,15 +202,15 @@ public:
   }
 
   /**
-   * @brief has_rt_error - check if a critical error in the realtime loop has occured
+   * @brief has_rt_error - check if a critical error in the realtime loop has occurred
    */
   bool has_rt_error() const
   {
-    return rt_error_ocurred_.load(std::memory_order_acquire);
+    return rt_error_occurred_.load(std::memory_order_acquire);
   }
 
   /**
-   * @brief get_rt_error - get the error that has occured in the rt thrread
+   * @brief get_rt_error - get the error that has occurred in the rt thread
    */
   std::exception_ptr get_rt_error() const
   {
@@ -216,15 +218,15 @@ public:
   }
 
   /**
-   * @brief has_service_error - check if a critical error in the service loop has occured
+   * @brief has_service_error - check if a critical error in the service loop has occurred
    */
   bool has_service_error() const
   {
-    return service_error_ocurred_;
+    return service_error_occurred_;
   }
 
   /**
-   * @brief get_service_error - get the error that has occured in the service thread
+   * @brief get_service_error - get the error that has occurred in the service thread
    */
   std::exception_ptr get_service_error() const
   {
@@ -241,10 +243,10 @@ public:
 
 private:
   std::exception_ptr rt_error_ptr_;
-  std::atomic_bool rt_error_ocurred_{ false };
+  std::atomic_bool rt_error_occurred_{ false };
 
   std::exception_ptr service_error_ptr_;
-  std::atomic_bool service_error_ocurred_{ false };
+  std::atomic_bool service_error_occurred_{ false };
   std::shared_ptr<EthercatBus> bus_;
   const ExecutorParameters params_;
   std::jthread rt_thread_;

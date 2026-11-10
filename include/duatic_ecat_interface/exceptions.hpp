@@ -38,10 +38,14 @@
 
 #include "duatic_ecat_interface/backend.hpp"
 
+// Exceptions of this library:
+// - failures of the bus, a device or the executor are reported by the exceptions below (all std::runtime_error)
+// - misuse of the API (e.g. using a device without bus, violated size preconditions) is reported by the
+//   std::logic_error family (std::logic_error, std::invalid_argument)
 namespace duatic::ecat_interface
 {
 /**
- * @brief BackendError - Exception which represents and error which comes for a specific backend
+ * @brief BackendError - Exception which represents an error which comes from a specific backend
  */
 class BackendError : public std::runtime_error
 {

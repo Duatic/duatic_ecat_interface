@@ -65,7 +65,7 @@ struct DiagnosticsOptions
     esc_port_diagnostics = level;
   }
 
-  // PDO related basic diagnostics such as WKC mismatcheds, lost frames, and total frames sent
+  // PDO related basic diagnostics such as WKC mismatches, lost frames, and total frames sent
   DiagnosticsLevel pdo_diagnostics{ DiagnosticsLevel::Basic };
   // Mailbox logging (Basic: emergencies, Tracing: every event) and the polling of the input mailboxes for emergencies
   // in update_service() - Off disables the polling, unsolicited messages then only arrive during accesses
@@ -189,7 +189,7 @@ struct ESCStatus
   // unused ports simply report link_up == false.
   std::array<ESCPortHealth, 4> ports{};
 
-  // As the ESC diagnostics is costly to read we maintain seperate timestamps
+  // As the ESC diagnostics is costly to read we maintain separate timestamps
   // for the port diagnostics
   HighPrecisionTimeStamp ports_update_timestamp;
 
@@ -258,16 +258,18 @@ struct ExecutorTimingDiagnostics
   // This is optional and only relevant for the RT thread
   std::optional<std::chrono::nanoseconds> accumulated_delay;
   // Amount of missed timing deadlines
-  // This is optional and onyl relevant for the RT thread
+  // This is optional and only relevant for the RT thread
   std::optional<uint64_t> missed_rate_steps;
-  // indicate if the specific executor thread is running
+  // indicate if the loop of this specific executor thread is running (false again once it ended, e.g. after an
+  // error) - unlike ExecutionStatus::is_spinning, which only tells that the executor was started
   bool is_running{ false };
 };
 
 // Executor diagnostics which is added by the executor to a diagnostics snapshot
 struct ExecutionStatus
 {
-  // Indicate whether the executor is currently running
+  // Indicate whether the executor has been started (spin() called, stop() not yet) - see
+  // ExecutorTimingDiagnostics::is_running for whether its threads are actually alive
   bool is_spinning = false;
   // Statistics for the realtime thread
   ExecutorTimingDiagnostics rt_thread_stats;
