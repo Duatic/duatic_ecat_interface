@@ -145,6 +145,26 @@ inline std::chrono::milliseconds transition_timeout(const EthercatBus::Parameter
   }
 }
 
+// The Error Flag of an AL Status (ETG.1000.6 5.3.2)
+constexpr bool has_error_indication(const uint16_t al_status)
+{
+  return (al_status & EC_STATE_ERROR) != 0;
+}
+
+// The AL Control value requesting a state: while the Error Flag is set a device rejects every request but Init
+// unless it carries the Ack Flag, which then clears the Error Flag (ETG.1000.6 Table 103)
+constexpr uint16_t al_control_request(const ec_state target_state, const uint16_t al_status)
+{
+  return has_error_indication(al_status) ? static_cast<uint16_t>(target_state | EC_STATE_ACK) :
+                                           static_cast<uint16_t>(target_state);
+}
+
+// The master shall ignore the AL Status Code while the Error Flag is clear (ETG.1000.6 6.4.1.1)
+constexpr uint16_t valid_al_status_code(const uint16_t al_status, const uint16_t al_status_code)
+{
+  return has_error_indication(al_status) ? al_status_code : 0;
+}
+
 // Time left until the deadline of a transition (ETG.2000: timeouts count from the request), 0 once it has passed
 inline std::chrono::milliseconds remaining(const HighPrecisionClock::time_point deadline,
                                            const HighPrecisionClock::time_point now = HighPrecisionClock::now())

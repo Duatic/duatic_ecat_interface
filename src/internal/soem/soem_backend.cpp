@@ -109,6 +109,7 @@ struct EthercatBus::BackendImpl
     if (latest_diagnostics_.slaves.size() != static_cast<std::size_t>(context_.ecatSlavecount_)) {
       latest_diagnostics_.slaves.resize(static_cast<std::size_t>(context_.ecatSlavecount_));
     }
+    last_acknowledged_al_status_codes_.assign(static_cast<std::size_t>(context_.ecatSlavecount_) + 1, 0);
 
     // Topology is already fully determined by ecx_config_init() above - capture it now,
     // unconditionally (it costs nothing and is unrelated to DiagnosticsOptions). parent_port /
@@ -409,6 +410,7 @@ struct EthercatBus::BackendImpl
     // devices stay in PreOp until here, so the pdo mapping and the dc configuration are complete beforehand
 
     // First we request it from every slave - all requests go out together and share one deadline
+    update_device_states();  // the requests acknowledge pending errors based on the current AL Status
     const auto safeop_deadline =
         HighPrecisionClock::now() + transition_timeout(params_, ec_state::EC_STATE_PRE_OP, ec_state::EC_STATE_SAFE_OP);
     for (auto& device : devices_) {
@@ -474,9 +476,13 @@ struct EthercatBus::BackendImpl
       device->on_pre_shutdown();
     }
 
-    // Bring all devices into pre-op
-    // Note: using device id 0 targets all devices on the bus
-    set_device_target_state(0, ec_state::EC_STATE_PRE_OP);
+    // Bring all devices into pre-op - one request per device so that devices with a pending error acknowledge it,
+    // a broadcast request without Ack Flag would be rejected by them (ETG.1000.6 Table 103)
+    update_device_states();
+    for (const auto& device : devices_) {
+      set_device_target_state(device->get_device_id(), ec_state::EC_STATE_PRE_OP);
+    }
+    // Note: using device id 0 waits for all devices on the bus
     wait_for_device_target_state(
         0, ec_state::EC_STATE_PRE_OP,
         transition_timeout(params_, ec_state::EC_STATE_OPERATIONAL, ec_state::EC_STATE_PRE_OP));
@@ -775,8 +781,31 @@ struct EthercatBus::BackendImpl
       std::lock_guard<std::mutex> mailbox_lock(mailbox_mutex_);
       restore_standard_mailbox(device_id);
     }
-    context_.ecatSlavelist_[device_id].state = target_state;
-    return ecx_writestate(&context_.context, device_id) > 0;
+    // Broadcast requests never carry the Ack Flag
+    if (device_id == 0) {
+      context_.ecatSlavelist_[0].state = target_state;
+      return ecx_writestate(&context_.context, 0) > 0;
+    }
+    // The decision is based on the AL Status of the last ecx_readstate() - callers refresh it beforehand.
+    // AL Control is written directly: the Ack Flag shares its bit with the Error Flag, so the request must not be
+    // stored in the slave list, which only ever holds the AL Status read from the device
+    const auto& device = context_.ecatSlavelist_[device_id];
+    if (has_error_indication(device.state)) {
+      log_acknowledged_al_status_code(device_id, device.ALstatuscode);
+    }
+    return ecx_FPWRw(&context_.ecat_port, device.configadr, ECT_REG_ALCTL,
+                     htoes(al_control_request(target_state, device.state)), EC_TIMEOUTRET3) > 0;
+  }
+
+  // Logs the AL Status Code acknowledged for a device - only when it changes, as activation re-requests every cycle
+  void log_acknowledged_al_status_code(const DeviceId device_id, const uint16_t al_status_code)
+  {
+    if (last_acknowledged_al_status_codes_[device_id] == al_status_code) {
+      return;
+    }
+    last_acknowledged_al_status_codes_[device_id] = al_status_code;
+    logging::warning(logger_) << "Device " << device_id << " reports the AL error '" << to_string(al_status_code)
+                              << "' - acknowledging it";
   }
 
   bool wait_for_device_target_state(const DeviceId device_id, ec_state target_state,
@@ -976,6 +1005,8 @@ private:
   mutable std::mutex mailbox_status_mutex_;
   // State change related
   std::mutex state_mutex_;
+  // Per device id (index 0 unused), the AL Status Code that was acknowledged last
+  std::vector<uint16_t> last_acknowledged_al_status_codes_;
   // EEPROM access
   std::mutex eeprom_mutex_;
   // Pause between two polls of the eeprom interface, SOEM's EC_LOCALDELAY which it keeps private
@@ -1074,17 +1105,15 @@ private:
                            Backend::SOEM);
       }
 
-      for (const auto& device : devices_) {
-        set_device_target_state(device->get_device_id(), ec_state::EC_STATE_OPERATIONAL);
-      }
-
-      // Update the context once (needed for the device state check)
+      // Update the context once (needed for the device state check and the acknowledge of pending errors)
       update_device_states();  // go through the lock
 
+      // Only the devices that are not operational yet are (re-)requested
       bool all_in_operational = true;
       for (const auto& device : devices_) {
         if (get_device_state(device->get_device_id()) != ec_state::EC_STATE_OPERATIONAL) {
           all_in_operational = false;
+          set_device_target_state(device->get_device_id(), ec_state::EC_STATE_OPERATIONAL);
         }
       }
 
@@ -1134,9 +1163,11 @@ private:
       }
       for (uint16_t i = 0; i < static_cast<uint16_t>(context_.ecatSlavecount_); i++) {
         latest_diagnostics_.slaves[i].position = i + 1;
-        latest_diagnostics_.slaves[i].al_status = context_.ecatSlavelist_[i + 1].ALstatuscode;
-        latest_diagnostics_.slaves[i].state =
-            map_from_soem_device_state(static_cast<ec_state>(context_.ecatSlavelist_[i + 1].state & 0x0F));
+        const uint16_t al_status = context_.ecatSlavelist_[i + 1].state;
+        latest_diagnostics_.slaves[i].al_status =
+            valid_al_status_code(al_status, context_.ecatSlavelist_[i + 1].ALstatuscode);
+        latest_diagnostics_.slaves[i].error_indication = has_error_indication(al_status);
+        latest_diagnostics_.slaves[i].state = map_from_soem_device_state(static_cast<ec_state>(al_status & 0x0F));
         latest_diagnostics_.slaves[i].online = !context_.ecatSlavelist_[i + 1].islost;
       }
     }

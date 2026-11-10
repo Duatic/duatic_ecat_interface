@@ -105,3 +105,29 @@ TEST(TransitionTimeout, DefaultsAreTheEtg2000Defaults)
   EXPECT_EQ(params.timeout_transition_back_to_init, milliseconds{ 5000 });
   EXPECT_EQ(params.timeout_transition_back_to_safeop, milliseconds{ 200 });
 }
+
+TEST(AlControlRequest, AcknowledgesAPendingError)
+{
+  const auto al_status = static_cast<uint16_t>(EC_STATE_SAFE_OP | EC_STATE_ERROR);
+  EXPECT_EQ(al_control_request(EC_STATE_OPERATIONAL, al_status), EC_STATE_OPERATIONAL | EC_STATE_ACK);
+  EXPECT_EQ(al_control_request(EC_STATE_PRE_OP, al_status), EC_STATE_PRE_OP | EC_STATE_ACK);
+}
+
+TEST(AlControlRequest, IsThePlainStateWithoutError)
+{
+  for (const auto state : { EC_STATE_INIT, EC_STATE_PRE_OP, EC_STATE_BOOT, EC_STATE_SAFE_OP, EC_STATE_OPERATIONAL }) {
+    EXPECT_EQ(al_control_request(state, EC_STATE_SAFE_OP), state);
+  }
+}
+
+TEST(AlStatus, ErrorIndicationIsTheErrorFlag)
+{
+  EXPECT_TRUE(has_error_indication(EC_STATE_SAFE_OP | EC_STATE_ERROR));
+  EXPECT_FALSE(has_error_indication(EC_STATE_SAFE_OP));
+}
+
+TEST(AlStatus, StatusCodeIsIgnoredWithoutErrorFlag)
+{
+  EXPECT_EQ(valid_al_status_code(EC_STATE_SAFE_OP | EC_STATE_ERROR, 0x001A), 0x001A);
+  EXPECT_EQ(valid_al_status_code(EC_STATE_SAFE_OP, 0x001A), 0);
+}

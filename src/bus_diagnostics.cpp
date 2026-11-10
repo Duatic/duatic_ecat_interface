@@ -90,7 +90,7 @@ std::string to_string(const DiagnosticsSnapshot& snap)
   os << "\n-- Slaves (" << snap.slaves.size() << ") --\n";
   for (const auto& s : snap.slaves) {
     os << "  [" << std::setw(2) << s.position << "] " << std::setw(11) << std::left << to_string(s.state) << std::right
-       << " | " << (s.online ? "online " : "OFFLINE") << " | AL 0x" << std::setfill('0') << std::setw(4) << std::hex
+       << " | " << (s.online ? "online " : "OFFLINE") << " | " << (s.error_indication ? "ERROR" : "ok   ") << " | AL 0x" << std::setfill('0') << std::setw(4) << std::hex
        << s.al_status << std::dec << std::setfill(' ') << " (" << to_string(s.al_status) << ")\n";
 
     os << "        ports (updated " << s.ports_update_timestamp.time_since_epoch().count() << " ns):\n";

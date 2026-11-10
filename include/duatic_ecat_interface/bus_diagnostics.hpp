@@ -162,8 +162,16 @@ struct ESCStatus
 
   // AL Status Code accompanying `state` — explains *why* the slave is in
   // its current state, particularly relevant after a fault or a rejected
-  // state transition request.
+  // state transition request. Only valid while `error_indication` is set,
+  // 0 otherwise (ETG.1000.6: the master shall ignore it then).
   AlStatus al_status{};
+
+  // Error Flag of the AL Status: the slave refused a requested state
+  // transition or left a state on its own due to an error. The master
+  // acknowledges it with the next state change requested for this slave.
+  // Like `state` and `al_status` it is only refreshed after activation
+  // while the ESC diagnostics are enabled.
+  bool error_indication = false;
 
   // True if the master is currently receiving valid responses from this
   // slave (i.e. it responded and contributed to the working counter on
