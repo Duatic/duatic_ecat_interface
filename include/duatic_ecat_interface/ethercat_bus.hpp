@@ -118,7 +118,8 @@ public:
 
     // distributed clock configuration
     bool dc_enabled{ false };
-    std::chrono::nanoseconds dc_cycle_time{};
+    // Cycle time of the bus: the update period of the executor (also without distributed clocks) and the sync0 cycle
+    std::chrono::nanoseconds cycle_time{};
     std::chrono::nanoseconds dc_sync0_shift{};
     std::chrono::nanoseconds master_send_offset{};
 
@@ -283,10 +284,10 @@ public:
   void write_sdo_untyped(std::span<const uint8_t> data, const DeviceId device_id, const SDOIndex index,
                          const SDOSubIndex sub_index, const SDOWriteCallback& cb);
 
-  template <SdoValueType T>
+  template <SDOValueType T>
   SDOReadValue<T> sdo_read(const DeviceId device_id, const SDOIndex index, const SDOSubIndex sub_index = 0);
 
-  template <SdoValueType T>
+  template <SDOValueType T>
   SDOWriteResult sdo_write(const DeviceId device_id, const T value, const SDOIndex index,
                            const SDOSubIndex sub_index = 0);
 
@@ -362,7 +363,7 @@ public:
   /**
    * @brief pop_mailbox_events - obtain the mailbox events no access was attributed to (mostly emergencies)
    * @return the events since the last call, oldest first and at most 64 - older ones are counted in
-   * MailboxStatus::mailbox_events_dropped
+   * MailboxStatus::events_dropped
    * @note thread safe
    */
   std::vector<MailboxEvent> pop_mailbox_events();

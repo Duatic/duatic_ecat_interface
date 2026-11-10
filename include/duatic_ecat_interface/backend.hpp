@@ -32,6 +32,8 @@
 
 #pragma once
 
+#include <cstdint>
+#include <ostream>
 #include <string>
 
 namespace duatic::ecat_interface
@@ -40,7 +42,7 @@ namespace duatic::ecat_interface
 /**
  * @brief Identifier of the active (compiled in) backend
  */
-enum class Backend
+enum class Backend : uint8_t
 {
   Unknown = 0,
   SOEM = 1,

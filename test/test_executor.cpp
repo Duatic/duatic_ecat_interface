@@ -47,6 +47,6 @@ TEST(SingleBusExecutor, RejectsAZeroCycleTime)
 TEST(SingleBusExecutor, AcceptsAPositiveCycleTime)
 {
   auto bus = std::make_shared<EthercatBus>(
-      EthercatBus::Parameters{ .interface = "unused", .dc_cycle_time = std::chrono::milliseconds{ 1 } });
+      EthercatBus::Parameters{ .interface = "unused", .cycle_time = std::chrono::milliseconds{ 1 } });
   EXPECT_NO_THROW(SingleBusExecutor{ bus });
 }

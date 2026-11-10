@@ -101,7 +101,7 @@ struct ExpectedDevice
 };
 
 // Representation of ethercat device states
-enum class EthercatDeviceState
+enum class EthercatDeviceState : uint8_t
 {
   None,
   Init,
@@ -195,7 +195,7 @@ concept EthercatValueType = std::same_as<T, bool> || std::same_as<T, int8_t> || 
     std::same_as<T, int64_t> || std::same_as<T, uint64_t> || std::same_as<T, float> || std::same_as<T, double>;
 
 template <typename T>
-concept SdoValueType = EthercatValueType<T> || std::same_as<T, std::string>;
+concept SDOValueType = EthercatValueType<T> || std::same_as<T, std::string>;
 
 // Types for mailbox diagnostics
 // These are on purpose located in this file as they are used in the access return values
@@ -278,7 +278,7 @@ struct MailboxEvent
 struct SDOReadResult
 {
   bool success{ false };
-  int actual_size_read{ 0 };
+  std::size_t actual_size_read{ 0 };
   int working_counter{ 0 };
 
   std::optional<MailboxEvent> mailbox_diagnostics{};
@@ -479,7 +479,7 @@ struct FoEReadResult
 {
   bool success{ false };
   int working_counter{ 0 };
-  std::size_t actual_read_size{ 0 };
+  std::size_t actual_size_read{ 0 };
 
   std::optional<MailboxEvent> mailbox_diagnostics{};
 

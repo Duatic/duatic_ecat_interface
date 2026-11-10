@@ -63,3 +63,9 @@ TEST(Exceptions, RuntimeErrorsShareTheLibraryBase)
   // Existing handlers of std::runtime_error keep catching them
   EXPECT_THROW(throw EthercatError("base"), std::runtime_error);
 }
+
+TEST(ALStatusCode, IsDecodedByItsOwnFunction)
+{
+  // Named function instead of a to_string overload, which would also match any other uint16_t (DeviceId, SDOIndex)
+  EXPECT_EQ(al_status_code_to_string(0x001A), "Synchronization error");
+}

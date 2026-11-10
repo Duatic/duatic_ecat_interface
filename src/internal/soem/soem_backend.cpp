@@ -61,10 +61,10 @@ namespace duatic::ecat_interface
 
 using namespace internal::soem;  // NOLINT(build/namespaces)
 
-// Helper function to convert the AlStatus into a human readable string
-std::string to_string(const AlStatus& status)
+// Helper function to convert the ALStatusCode into a human readable string
+std::string al_status_code_to_string(const ALStatusCode code)
 {
-  return std::string(ec_ALstatuscode2string(status));
+  return std::string(ec_ALstatuscode2string(code));
 }
 
 struct EthercatBus::BackendImpl
@@ -73,7 +73,7 @@ struct EthercatBus::BackendImpl
     : params_(params)
     , owner_(owner)
     , logger_(logging::get_logger_with_default_sink("SOEM-Backend"))
-    , dc_sync_(params.dc_cycle_time, params_.master_send_offset)
+    , dc_sync_(params.cycle_time, params_.master_send_offset)
   {
   }
 
@@ -247,9 +247,10 @@ struct EthercatBus::BackendImpl
                               << ", SID 0x" << std::setfill('0') << std::setw(2) << std::hex
                               << static_cast<uint16_t>(sub_index)
                               << "): " << (event ? event->description : "unknown reason") << std::endl;
-      return SDOReadResult{
-        .success = false, .actual_size_read = actual_size, .working_counter = wkc, .mailbox_diagnostics = event
-      };
+      return SDOReadResult{ .success = false,
+                            .actual_size_read = static_cast<std::size_t>(std::max(actual_size, 0)),
+                            .working_counter = wkc,
+                            .mailbox_diagnostics = event };
     }
 
     if (check_size && requested_size != actual_size) {
@@ -260,9 +261,10 @@ struct EthercatBus::BackendImpl
                               << ")." << std::endl;
       throw BackendError("SDORead size mismatch", Backend::SOEM, actual_size);
     }
-    return SDOReadResult{
-      .success = true, .actual_size_read = actual_size, .working_counter = wkc, .mailbox_diagnostics = event
-    };
+    return SDOReadResult{ .success = true,
+                          .actual_size_read = static_cast<std::size_t>(std::max(actual_size, 0)),
+                          .working_counter = wkc,
+                          .mailbox_diagnostics = event };
   }
 
   void read_sdo_untyped_async(const SDOReadCallback& cb, std::span<uint8_t> data, const DeviceId device_id,
@@ -382,7 +384,7 @@ struct EthercatBus::BackendImpl
     if (params_.dc_enabled) {
       for (uint16_t i = 1; i <= static_cast<uint16_t>(context_.ecatSlavecount_); i++) {
         if (context_.ecatSlavelist_[i].hasdc) {
-          ecx_dcsync0(&context_.context, i, true, static_cast<uint32_t>(params_.dc_cycle_time.count()),
+          ecx_dcsync0(&context_.context, i, true, static_cast<uint32_t>(params_.cycle_time.count()),
                       static_cast<int32_t>(params_.dc_sync0_shift.count()));
         }
       }
@@ -561,7 +563,7 @@ struct EthercatBus::BackendImpl
       SDOEntry entry{};
       ecx_readODdescription(&context_.context, static_cast<uint16_t>(i), &od_list);
       entry.index = static_cast<SDOIndex>(od_list.Index[i]);
-      entry.obj_type = static_cast<SDOObjectCode>(od_list.ObjectCode[i]);
+      entry.object_code = static_cast<SDOObjectCode>(od_list.ObjectCode[i]);
       entry.data_type = static_cast<DataType>(od_list.DataType[i]);
       entry.count_sub_indices = static_cast<std::size_t>(od_list.MaxSub[i]);
       entry.name = od_list.Name[i];
@@ -574,7 +576,7 @@ struct EthercatBus::BackendImpl
     if (full_read) {
       for (auto& obj : result) {
         // Var types do now have sub objects
-        if (obj.obj_type == SDOObjectCode::Var) {
+        if (obj.object_code == SDOObjectCode::Var) {
           continue;
         }
         // Clear previous subentries just in case
@@ -755,12 +757,12 @@ struct EthercatBus::BackendImpl
       logging::error(logger_) << "Device id " << device_id << ": FoE read of \"" << file_name << "\" failed, wkc "
                               << wkc << ": " << (event ? event->description : "unknown reason") << std::endl;
       return FoEReadValue(FoEReadResult{
-          .success = false, .working_counter = wkc, .actual_read_size = 0, .mailbox_diagnostics = event });
+          .success = false, .working_counter = wkc, .actual_size_read = 0, .mailbox_diagnostics = event });
     }
 
     return FoEReadValue(FoEReadResult{ .success = true,
                                        .working_counter = wkc,
-                                       .actual_read_size = static_cast<std::size_t>(
+                                       .actual_size_read = static_cast<std::size_t>(
                                            std::min(static_cast<std::size_t>(actual_size), buffer.size())),
 
                                        .mailbox_diagnostics = event },
@@ -829,8 +831,8 @@ struct EthercatBus::BackendImpl
       return;
     }
     last_acknowledged_al_status_codes_[device_id] = al_status_code;
-    logging::warning(logger_) << "Device " << device_id << " reports the AL error '" << to_string(al_status_code)
-                              << "' - acknowledging it";
+    logging::warning(logger_) << "Device " << device_id << " reports the AL error '"
+                              << al_status_code_to_string(al_status_code) << "' - acknowledging it";
   }
 
   bool wait_for_device_target_state(const DeviceId device_id, ec_state target_state,
@@ -1205,7 +1207,7 @@ private:
       for (uint16_t i = 0; i < static_cast<uint16_t>(context_.ecatSlavecount_); i++) {
         latest_diagnostics_.slaves[i].position = i + 1;
         const uint16_t al_status = context_.ecatSlavelist_[i + 1].state;
-        latest_diagnostics_.slaves[i].al_status =
+        latest_diagnostics_.slaves[i].al_status_code =
             valid_al_status_code(al_status, context_.ecatSlavelist_[i + 1].ALstatuscode);
         latest_diagnostics_.slaves[i].error_indication = has_error_indication(al_status);
         latest_diagnostics_.slaves[i].state = map_from_soem_device_state(static_cast<ec_state>(al_status & 0x0F));
@@ -1447,7 +1449,7 @@ private:
     std::lock_guard<std::mutex> lock(mailbox_status_mutex_);
     if (unsolicited_events_.size() == max_unsolicited_events) {
       unsolicited_events_.erase(unsolicited_events_.begin());
-      mailbox_status_.mailbox_events_dropped += 1;
+      mailbox_status_.events_dropped += 1;
     }
     unsolicited_events_.push_back(std::move(ev));
   }
@@ -1458,10 +1460,10 @@ private:
       std::lock_guard<std::mutex> lock(mailbox_status_mutex_);
       switch (ev.kind) {
         case MailboxEventKind::Emergency:
-          mailbox_status_.mailbox_emergencies += 1;
+          mailbox_status_.emergencies += 1;
           break;
         case MailboxEventKind::Timeout:
-          mailbox_status_.mailbox_timeouts += 1;
+          mailbox_status_.timeouts += 1;
           break;
         case MailboxEventKind::Unknown:
         case MailboxEventKind::Abort:
@@ -1469,7 +1471,7 @@ private:
         case MailboxEventKind::MailboxLayerError:
         case MailboxEventKind::BufferTooSmall:
         case MailboxEventKind::NotFound:
-          mailbox_status_.mailbox_aborts += 1;
+          mailbox_status_.aborts += 1;
           break;
       }
     }
@@ -1665,7 +1667,7 @@ void EthercatBus::read_tx_pdo(const DeviceId device_id, std::span<uint8_t> data)
   impl_->read_tx_pdo(device_id, data);
 }
 
-template <SdoValueType T>
+template <SDOValueType T>
 SDOReadValue<T> EthercatBus::sdo_read(const DeviceId device_id, const SDOIndex index, const SDOSubIndex sub_index)
 {
   static_assert(!std::is_same_v<T, std::string>);
@@ -1698,8 +1700,7 @@ SDOReadValue<std::string> EthercatBus::sdo_read<std::string>(const DeviceId devi
   }
 
   // Create an std::string out of it
-  const std::string_view raw{ data.data(),
-                              std::min<std::size_t>(static_cast<std::size_t>(result.actual_size_read), data.size()) };
+  const std::string_view raw{ data.data(), std::min<std::size_t>(result.actual_size_read, data.size()) };
   const auto text = raw.substr(0, raw.find('\0'));
   return SDOReadValue<std::string>(result, std::string(text));
 }
@@ -1716,7 +1717,7 @@ template SDOReadValue<int64_t> EthercatBus::sdo_read<int64_t>(DeviceId, SDOIndex
 template SDOReadValue<float> EthercatBus::sdo_read<float>(DeviceId, SDOIndex, SDOSubIndex);
 template SDOReadValue<double> EthercatBus::sdo_read<double>(DeviceId, SDOIndex, SDOSubIndex);
 
-template <SdoValueType T>
+template <SDOValueType T>
 SDOWriteResult EthercatBus::sdo_write(const DeviceId device_id, const T value, const SDOIndex index,
                                       const SDOSubIndex sub_index)
 {

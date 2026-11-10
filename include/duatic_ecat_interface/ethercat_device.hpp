@@ -123,7 +123,7 @@ public:
   }
 
   // Helper functions for performing sdo read and writes
-  template <SdoValueType T>
+  template <SDOValueType T>
   SDOReadValue<T> sdo_read(const SDOIndex index, const SDOSubIndex sub_index = 0)
   {
     if (!bus_) {
@@ -132,7 +132,7 @@ public:
     return bus_->sdo_read<T>(get_device_id(), index, sub_index);
   }
 
-  template <SdoValueType T>
+  template <SDOValueType T>
   SDOWriteResult sdo_write(const T value, const SDOIndex index, const SDOSubIndex sub_index = 0)
   {
     if (!bus_) {

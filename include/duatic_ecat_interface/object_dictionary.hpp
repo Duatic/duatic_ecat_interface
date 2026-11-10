@@ -52,7 +52,7 @@ struct SDOSubEntry
 struct SDOEntry
 {
   SDOIndex index{};
-  SDOObjectCode obj_type{};
+  SDOObjectCode object_code{};
   DataType data_type{};
   std::size_t count_sub_indices{};
   std::string name{};

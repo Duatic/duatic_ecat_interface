@@ -53,8 +53,8 @@ struct ExecutorParameters
   // priority and desired cpu core for the update thread
   int realtime_priority{ 60 };
   int desired_cpu_core{ -1 };
-  // rate at which the service  thread is spun
-  std::chrono::microseconds service_thread_update_rate{ 2010 };
+  // period at which the service thread is spun
+  std::chrono::microseconds service_thread_period{ 2010 };
 };
 
 /**
@@ -69,12 +69,12 @@ public:
   explicit SingleBusExecutor(std::shared_ptr<EthercatBus> bus, const ExecutorParameters& params = ExecutorParameters{})
     : bus_(bus)
     , params_(params)
-    , update_rate_(bus->get_parameters().dc_cycle_time)
+    , update_rate_(bus->get_parameters().cycle_time)
     , logger_(logging::get_logger_with_default_sink("SingleBusExecutor"))
   {
     // The cycle time is the period of the realtime thread, also without distributed clocks
-    if (bus->get_parameters().dc_cycle_time <= std::chrono::nanoseconds{ 0 }) {
-      throw ExecutorError("The bus cycle time (dc_cycle_time) has to be greater than zero to spin the bus");
+    if (bus->get_parameters().cycle_time <= std::chrono::nanoseconds{ 0 }) {
+      throw ExecutorError("The bus cycle time (cycle_time) has to be greater than zero to spin the bus");
     }
   }
 
@@ -94,7 +94,7 @@ public:
     }
     logging::info(logger_) << "Setting up Executor with update frequency: "
                            << 1.0 / std::chrono::duration_cast<std::chrono::duration<double>>(
-                                        bus_->get_parameters().dc_cycle_time)
+                                        bus_->get_parameters().cycle_time)
                                         .count()
                            << "Hz";
 
@@ -118,11 +118,11 @@ public:
 
           update_timing_diagnostics(rt_thread_diagnostics_, start, HighPrecisionClock::now());
           rt_thread_diagnostics_.missed_rate_steps = update_rate_.overrun_count();
-          rt_thread_diagnostics_.accumulated_delay = update_rate_.accumulated_delay_ns();
+          rt_thread_diagnostics_.accumulated_delay = update_rate_.accumulated_delay();
           publish_diagnostics(rt_thread_diagnostics_, published_rt_thread_diagnostics_, LockMode::TryOnce);
 
           if (this->update_rate_.step(dc_correction_offset.value_or(std::chrono::nanoseconds{ 0 }))) {
-            logging::warning(logger_) << "Could not keep update rate: " << this->update_rate_.last_delay_ns().count()
+            logging::warning(logger_) << "Could not keep update rate: " << this->update_rate_.last_delay().count()
                                       << " ns";
           }
         }
@@ -158,7 +158,7 @@ public:
           update_timing_diagnostics(service_thread_diagnostics_, start, HighPrecisionClock::now());
           publish_diagnostics(service_thread_diagnostics_, published_service_thread_diagnostics_, LockMode::Yield);
           // We need less precise update rates for the service thread which is why we go for a simple condition variable
-          cv.wait_for(lk, stoken, params_.service_thread_update_rate, [] { return false; });
+          cv.wait_for(lk, stoken, params_.service_thread_period, [] { return false; });
         }
       } catch (std::exception& ex) {
         logging::fatal(logger_) << "Caught exception in Service thread: " << ex.what();
@@ -317,9 +317,9 @@ private:
   {
     using namespace std::chrono;  // NOLINT(build/namespaces)
     // First diagnostics is -> at which interval was the update called
-    diag.last_update_rate = duration_cast<microseconds>(start_tp - diag.last_update_tp);
+    diag.last_update_period = duration_cast<microseconds>(start_tp - diag.last_update_tp);
     diag.average_update_rate =
-        0.5 * (1.0 / duration_cast<duration<double>>(diag.last_update_rate).count()) + 0.5 * diag.average_update_rate;
+        0.5 * (1.0 / duration_cast<duration<double>>(diag.last_update_period).count()) + 0.5 * diag.average_update_rate;
     diag.last_update_tp = start_tp;
     // Second diagnostics is -> how long took the update
     diag.last_update_duration = duration_cast<microseconds>(after_update_tp - start_tp);
