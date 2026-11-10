@@ -95,3 +95,13 @@ TEST(Remaining, IsZeroOnceTheDeadlinePassed)
   EXPECT_EQ(remaining(now, now), milliseconds{ 0 });
   EXPECT_EQ(remaining(now - milliseconds{ 5 }, now), milliseconds{ 0 });
 }
+
+// ETG.2000 Device/Info/StateMachine/Timeout defaults, used as long as no ESI values are configured
+TEST(TransitionTimeout, DefaultsAreTheEtg2000Defaults)
+{
+  const EthercatBus::Parameters params;
+  EXPECT_EQ(params.timeout_transition_preop, milliseconds{ 3000 });
+  EXPECT_EQ(params.timeout_transition_operational, milliseconds{ 10000 });
+  EXPECT_EQ(params.timeout_transition_back_to_init, milliseconds{ 5000 });
+  EXPECT_EQ(params.timeout_transition_back_to_safeop, milliseconds{ 200 });
+}

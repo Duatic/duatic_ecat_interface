@@ -112,9 +112,10 @@ public:
     std::chrono::nanoseconds dc_sync0_shift{};
     std::chrono::nanoseconds master_send_offset{};
 
-    // State transition timeouts, named after the ESI's StateMachine/Timeout elements (ETG.2000) they correspond to
-    // SafeopOpTimeout: SafeOp -> Op and PreOp -> SafeOp, the DuaDrive's value. 0 disables the SafeOp -> Op timeout
-    std::chrono::milliseconds timeout_transition_operational{ 9000 };
+    // State transition timeouts, named after the ESI's StateMachine/Timeout elements (ETG.2000) they correspond to.
+    // The defaults are the ETG.2000 defaults - set the device's ESI values if known (ETG.1500 5.3.4)
+    // SafeopOpTimeout: SafeOp -> Op and PreOp -> SafeOp. 0 disables the SafeOp -> Op timeout
+    std::chrono::milliseconds timeout_transition_operational{ 10000 };
     // PreopTimeout: Init -> PreOp/Boot
     std::chrono::milliseconds timeout_transition_preop{ 3000 };
     // BackToInitTimeout: any state -> Init and Op/SafeOp -> PreOp
