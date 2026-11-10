@@ -32,12 +32,14 @@
 
 #pragma once
 #include <atomic>
+#include <mutex>
 #include <thread>
 #include <vector>
 #include <memory>
 #include <condition_variable>
 
 #include "duatic_ecat_interface/precision_update_rate.hpp"
+#include "duatic_ecat_interface/priority_inheriting_mutex.hpp"
 #include "duatic_ecat_interface/exceptions.hpp"
 #include "duatic_ecat_interface/realtime_utils.hpp"
 #include "duatic_ecat_interface/ethercat_bus.hpp"
@@ -104,6 +106,7 @@ public:
                                      "security.limits";
         }
         rt_thread_diagnostics_.is_running = true;
+        publish_diagnostics(rt_thread_diagnostics_, published_rt_thread_diagnostics_, LockMode::Block);
 
         while (!stoken.stop_requested()) {
           const auto start = HighPrecisionClock::now();
@@ -116,24 +119,24 @@ public:
           update_timing_diagnostics(rt_thread_diagnostics_, start, HighPrecisionClock::now());
           rt_thread_diagnostics_.missed_rate_steps = update_rate_.overrun_count();
           rt_thread_diagnostics_.accumulated_delay = update_rate_.accumulated_delay_ns();
+          publish_diagnostics(rt_thread_diagnostics_, published_rt_thread_diagnostics_, LockMode::TryOnce);
 
           if (this->update_rate_.step(dc_correction_offset.value_or(std::chrono::nanoseconds{ 0 }))) {
             logging::warning(logger_) << "Could not keep update rate: " << this->update_rate_.last_delay_ns().count()
                                       << " ns";
           }
         }
-        rt_thread_diagnostics_.is_running = false;
       } catch (std::exception& ex) {
         logging::fatal(logger_) << "Caught exception in RT thread: " << ex.what();
         rt_error_ptr_ = std::current_exception();
         rt_error_occurred_.store(true, std::memory_order_release);
-        rt_thread_diagnostics_.is_running = false;
       } catch (...) {
         logging::fatal(logger_) << "Caught unknown exception in RT thread";
         rt_error_ptr_ = std::current_exception();
         rt_error_occurred_.store(true, std::memory_order_release);
-        rt_thread_diagnostics_.is_running = false;
       }
+      rt_thread_diagnostics_.is_running = false;
+      publish_diagnostics(rt_thread_diagnostics_, published_rt_thread_diagnostics_, LockMode::Block);
     });
 
     service_thread_ = std::jthread([&](std::stop_token stoken) {
@@ -143,6 +146,7 @@ public:
 
       try {
         service_thread_diagnostics_.is_running = true;
+        publish_diagnostics(service_thread_diagnostics_, published_service_thread_diagnostics_, LockMode::Yield);
         while (!stoken.stop_requested()) {
           const auto start = HighPrecisionClock::now();
           if (!bus_->update_service()) {
@@ -152,21 +156,21 @@ public:
           }
 
           update_timing_diagnostics(service_thread_diagnostics_, start, HighPrecisionClock::now());
+          publish_diagnostics(service_thread_diagnostics_, published_service_thread_diagnostics_, LockMode::Yield);
           // We need less precise update rates for the service thread which is why we go for a simple condition variable
           cv.wait_for(lk, stoken, params_.service_thread_update_rate, [] { return false; });
         }
-        service_thread_diagnostics_.is_running = false;
       } catch (std::exception& ex) {
         logging::fatal(logger_) << "Caught exception in Service thread: " << ex.what();
         service_error_ptr_ = std::current_exception();
         service_error_occurred_.store(true, std::memory_order_release);
-        service_thread_diagnostics_.is_running = false;
       } catch (...) {
         logging::fatal(logger_) << "Caught unknown exception in Service thread";
         service_error_ptr_ = std::current_exception();
         service_error_occurred_.store(true, std::memory_order_release);
-        service_thread_diagnostics_.is_running = false;
       }
+      service_thread_diagnostics_.is_running = false;
+      publish_diagnostics(service_thread_diagnostics_, published_service_thread_diagnostics_, LockMode::Yield);
 
       logging::info(logger_) << "Service thread is ending now" << std::endl;
     });
@@ -196,13 +200,16 @@ public:
   /**
    * @brief full_diagnostics - obtain a full diagnostics snapshot of the ethercat bus and include executor diagnostics
    * @note see @ref EthercatBus::diagnostics for parameter meaning
+   * @note intended for consumer threads with a lower priority than the realtime thread
    */
   DiagnosticsSnapshot full_diagnostics(bool force_update = false)
   {
     auto snapshot = bus_->diagnostics(force_update);
+    lock_by_polling(diagnostics_mutex_);
+    std::lock_guard<PriorityInheritingMutex> lock(diagnostics_mutex_, std::adopt_lock);
     snapshot.executor = ExecutionStatus{ .is_spinning = spinning_,
-                                         .rt_thread_stats = rt_thread_diagnostics_,
-                                         .service_thread_stats = service_thread_diagnostics_ };
+                                         .rt_thread_stats = published_rt_thread_diagnostics_,
+                                         .service_thread_stats = published_service_thread_diagnostics_ };
     return snapshot;
   }
 
@@ -263,8 +270,46 @@ private:
   // Read by other threads through is_spinning() / full_diagnostics()
   std::atomic_bool spinning_{ false };
 
+  // Working copies, each only accessed by its own thread
   alignas(64) ExecutorTimingDiagnostics rt_thread_diagnostics_;
   alignas(64) ExecutorTimingDiagnostics service_thread_diagnostics_;
+  // Copies for other threads (full_diagnostics()), guarded by diagnostics_mutex_
+  // Priority inheriting as the RT thread blocks on it once before and once after its loop
+  PriorityInheritingMutex diagnostics_mutex_;
+  ExecutorTimingDiagnostics published_rt_thread_diagnostics_;
+  ExecutorTimingDiagnostics published_service_thread_diagnostics_;
+
+  enum class LockMode
+  {
+    // RT thread in its loop: skip publishing while the lock is held, the next cycle publishes again
+    TryOnce,
+    // RT thread before / after its loop: block, a holder inherits the RT priority
+    Block,
+    // Any other thread: never wait on the lock in the kernel, see lock_by_polling
+    Yield
+  };
+
+  // Copies a thread's working diagnostics for other threads
+  void publish_diagnostics(const ExecutorTimingDiagnostics& working, ExecutorTimingDiagnostics& published,
+                           const LockMode mode)
+  {
+    std::unique_lock<PriorityInheritingMutex> lock(diagnostics_mutex_, std::defer_lock);
+    switch (mode) {
+      case LockMode::TryOnce:
+        if (!lock.try_lock()) {
+          return;
+        }
+        break;
+      case LockMode::Block:
+        lock.lock();
+        break;
+      case LockMode::Yield:
+        lock_by_polling(diagnostics_mutex_);
+        lock = std::unique_lock<PriorityInheritingMutex>(diagnostics_mutex_, std::adopt_lock);
+        break;
+    }
+    published = working;
+  }
 
   static constexpr void update_timing_diagnostics(ExecutorTimingDiagnostics& diag,
                                                   const HighPrecisionTimeStamp& start_tp,

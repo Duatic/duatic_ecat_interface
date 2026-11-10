@@ -73,7 +73,6 @@ public:
 
   friend class EthercatBus;
 
-  explicit EthercatDevice(EthercatBus* bus, DeviceInfo device_info);
   ~EthercatDevice() = default;
 
   // While in theory we could have multiple "EthercatDevice" instances handling the same device
@@ -99,58 +98,6 @@ public:
   }
 
   /**
-   * @brief on_startup - in startup(), before the bus pdo mapping / dc will be configured (devices are in PRE_OP)
-   */
-  void on_startup()
-  {
-    if (hooks_.on_startup) {
-      hooks_.on_startup();
-    }
-  }
-
-  /**
-   * @brief on_pre_activate - in activate(), before SAFE_OP is requested from the devices (pdo mapping and dc are
-   * configured)
-   */
-  void on_pre_activate()
-  {
-    if (hooks_.on_pre_activate) {
-      hooks_.on_pre_activate();
-    }
-  }
-
-  /**
-   * @brief on_post_activate - in activate(), after all devices reached SAFE_OP - the transition to OPERATIONAL
-   * follows once the bus is spun
-   */
-  void on_post_activate()
-  {
-    if (hooks_.on_post_activate) {
-      hooks_.on_post_activate();
-    }
-  }
-
-  /**
-   * @brief on_pre_shutdown - before bus will be shutdown
-   */
-  void on_pre_shutdown()
-  {
-    if (hooks_.on_pre_shutdown) {
-      hooks_.on_pre_shutdown();
-    }
-  }
-
-  /**
-   * @brief on_post_shutdown - after bus will be shutdown
-   */
-  void on_post_shutdown()
-  {
-    if (hooks_.on_post_shutdown) {
-      hooks_.on_post_shutdown();
-    }
-  }
-
-  /**
    * @brief get_device_id - get the id of this specific device on the bus
    */
   DeviceId get_device_id() const
@@ -173,26 +120,6 @@ public:
   const DeviceInfo& get_device_info() const
   {
     return device_info_;
-  }
-
-  /**
-   * @brief on_pdo_configured - callback which gets called as soon as the pdos has been setup and configured in the
-   * backend
-   */
-  void on_pdo_configured([[maybe_unused]] std::size_t configured_rx_pdo_size,
-                         [[maybe_unused]] std::size_t configured_tx_pdo_size)
-  {
-    // For the generic device we need to allocate the necessary buffers
-    rx_pdo_.resize(configured_rx_pdo_size, 0);
-    rx_pdo_last_write_time_ = HighPrecisionClock::now();
-    tx_pdo_.resize(configured_tx_pdo_size, 0);
-    tx_pdo_last_read_time_ = HighPrecisionClock::now();
-
-    pdo_initialized = true;
-
-    if (hooks_.on_pdo_configured) {
-      hooks_.on_pdo_configured();
-    }
   }
 
   // Helper functions for performing sdo read and writes
@@ -237,6 +164,45 @@ public:
    * @note thread safe
    */
   FoEReadValue foe_read(const std::string& file_name, std::span<uint8_t> buffer);
+
+  /**
+   * @brief register_read - perform a blocking read of the specified ESC register of this device
+   * @note thread safe
+   */
+  template <EthercatValueType T>
+  RegisterReadValue<T> register_read(const RegisterAddress address)
+  {
+    if (!bus_) {
+      throw std::invalid_argument("Bus had not been initialized yet");
+    }
+    return bus_->register_read<T>(get_device_id(), address);
+  }
+
+  /**
+   * @brief register_write - perform a blocking write to the specified ESC register of this device
+   * @note thread safe
+   */
+  template <EthercatValueType T>
+  RegisterWriteResult register_write(const RegisterAddress address, const T data)
+  {
+    if (!bus_) {
+      throw std::invalid_argument("Bus had not been initialized yet");
+    }
+    return bus_->register_write<T>(get_device_id(), address, data);
+  }
+
+  /**
+   * @brief read_eeprom_untyped - perform a blocking read of this device's EEPROM (SII), starting at a word address
+   * Fails while the device's firmware accesses the EEPROM. data.size() must be even
+   * @note thread safe
+   */
+  EepromReadResult read_eeprom_untyped(std::span<uint8_t> data, const EepromWordAddress word_address)
+  {
+    if (!bus_) {
+      throw std::invalid_argument("Bus had not been initialized yet");
+    }
+    return bus_->read_eeprom_untyped(data, get_device_id(), word_address);
+  }
 
   /**
    * @brief Access the currently configured RX PDO (rx == data the master sends and the device receives)
@@ -364,6 +330,81 @@ public:
   }
 
 private:
+  // Devices are only created by the bus (one per device found on the bus) - see EthercatBus::acquire_device
+  explicit EthercatDevice(EthercatBus* bus, DeviceInfo device_info);
+
+  // The following triggers of the registered hooks are only called by the bus
+  /**
+   * @brief on_startup - in startup(), before the bus pdo mapping / dc will be configured (devices are in PRE_OP)
+   */
+  void on_startup()
+  {
+    if (hooks_.on_startup) {
+      hooks_.on_startup();
+    }
+  }
+
+  /**
+   * @brief on_pre_activate - in activate(), before SAFE_OP is requested from the devices (pdo mapping and dc are
+   * configured)
+   */
+  void on_pre_activate()
+  {
+    if (hooks_.on_pre_activate) {
+      hooks_.on_pre_activate();
+    }
+  }
+
+  /**
+   * @brief on_post_activate - in activate(), after all devices reached SAFE_OP - the transition to OPERATIONAL
+   * follows once the bus is spun
+   */
+  void on_post_activate()
+  {
+    if (hooks_.on_post_activate) {
+      hooks_.on_post_activate();
+    }
+  }
+
+  /**
+   * @brief on_pre_shutdown - before bus will be shutdown
+   */
+  void on_pre_shutdown()
+  {
+    if (hooks_.on_pre_shutdown) {
+      hooks_.on_pre_shutdown();
+    }
+  }
+
+  /**
+   * @brief on_post_shutdown - after bus will be shutdown
+   */
+  void on_post_shutdown()
+  {
+    if (hooks_.on_post_shutdown) {
+      hooks_.on_post_shutdown();
+    }
+  }
+
+  /**
+   * @brief on_pdo_configured - callback which gets called as soon as the pdos has been setup and configured in the
+   * backend
+   */
+  void on_pdo_configured(std::size_t configured_rx_pdo_size, std::size_t configured_tx_pdo_size)
+  {
+    // For the generic device we need to allocate the necessary buffers
+    rx_pdo_.resize(configured_rx_pdo_size, 0);
+    rx_pdo_last_write_time_ = HighPrecisionClock::now();
+    tx_pdo_.resize(configured_tx_pdo_size, 0);
+    tx_pdo_last_read_time_ = HighPrecisionClock::now();
+
+    pdo_initialized = true;
+
+    if (hooks_.on_pdo_configured) {
+      hooks_.on_pdo_configured();
+    }
+  }
+
   // Internal pointer to the actual bus
   EthercatBus* bus_{ nullptr };
   /**

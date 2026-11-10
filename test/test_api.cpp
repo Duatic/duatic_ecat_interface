@@ -35,6 +35,7 @@
 #include <utility>
 
 #include "duatic_ecat_interface/ethercat_bus.hpp"
+#include "duatic_ecat_interface/ethercat_device.hpp"
 #include "duatic_ecat_interface/exceptions.hpp"
 
 using namespace duatic::ecat_interface;  // NOLINT(build/namespaces)
@@ -43,6 +44,15 @@ using namespace duatic::ecat_interface;  // NOLINT(build/namespaces)
 static_assert(std::is_same_v<decltype(std::declval<EthercatBus&>().register_write<uint32_t>(
                                  DeviceId{}, RegisterAddress{}, uint32_t{})),
                              RegisterWriteResult>);
+
+// Devices are only created by the bus, and only the bus triggers their hooks
+static_assert(!std::is_constructible_v<EthercatDevice, EthercatBus*, DeviceInfo>);
+template <typename Device>
+concept HookTriggersAccessible = requires(Device& device) {
+  device.on_startup();
+  device.on_pdo_configured(std::size_t{}, std::size_t{});
+};
+static_assert(!HookTriggersAccessible<EthercatDevice>);
 
 TEST(Exceptions, RuntimeErrorsShareTheLibraryBase)
 {

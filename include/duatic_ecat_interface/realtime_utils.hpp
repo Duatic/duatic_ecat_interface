@@ -36,6 +36,7 @@
 #include <sched.h>
 #include <unistd.h>
 #include <csignal>
+#include <thread>
 
 #include <duatic_message_logger/log.hpp>
 
@@ -159,5 +160,19 @@ inline bool restore_signal_mask(const sigset_t& mask)
     return false;
   }
   return true;
+}
+
+/**
+ * @brief lock_by_polling - acquire a mutex the realtime thread only try_locks, by polling try_lock
+ * A thread waiting on the mutex in the kernel would force the realtime thread's next unlock into a futex wake syscall,
+ * therefore every other thread polls instead. The mutex is only held for short copies, so the poll is short
+ * @note only for threads with a lower priority than the realtime thread (service thread, consumers of the diagnostics)
+ */
+template <typename Mutex>
+void lock_by_polling(Mutex& mutex)
+{
+  while (!mutex.try_lock()) {
+    std::this_thread::yield();
+  }
 }
 }  // namespace duatic::ecat_interface

@@ -46,6 +46,7 @@
 
 #include "duatic_ecat_interface/object_dictionary.hpp"
 #include "duatic_ecat_interface/priority_inheriting_mutex.hpp"
+#include "duatic_ecat_interface/realtime_utils.hpp"
 
 #include "duatic_ecat_interface/internal/backend_impl.hpp"
 #include "duatic_ecat_interface/internal/soem/soem_context.hpp"
@@ -176,7 +177,9 @@ struct EthercatBus::BackendImpl
 
     // SOEM style iteration - we need to start at 1 because 0 is the master
     for (int i = 1; i < device_count + 1; i++) {
-      devices_.emplace_back(std::make_shared<EthercatDevice>(owner_, scan(static_cast<DeviceId>(i))));
+      // The constructor is private to the bus, which std::make_shared cannot reach
+      devices_.emplace_back(
+          std::shared_ptr<EthercatDevice>(new EthercatDevice(owner_, scan(static_cast<DeviceId>(i)))));
     }
 
     return device_count;
@@ -984,7 +987,9 @@ struct EthercatBus::BackendImpl
       update_diagnostics_slow();
       snapshot = latest_diagnostics_;
     } else {
-      std::lock_guard<std::mutex> lock(diagnostics_mutex_);
+      // The RT thread only try_locks the diagnostics, a sleeping waiter would force its unlock into a syscall
+      lock_by_polling(diagnostics_mutex_);
+      std::lock_guard<std::mutex> lock(diagnostics_mutex_, std::adopt_lock);
       snapshot = latest_diagnostics_;
     }
 
@@ -1224,7 +1229,8 @@ private:
     // result, consistent with its role for the rest of latest_diagnostics_.slaves (see
     // update_diagnostics_fast()) - never held across the register reads above.
     {
-      std::lock_guard<std::mutex> lock(diagnostics_mutex_);
+      lock_by_polling(diagnostics_mutex_);
+      std::lock_guard<std::mutex> lock(diagnostics_mutex_, std::adopt_lock);
       latest_diagnostics_.slaves[current_selected_diagnostics_slave_].ports = ports;
       latest_diagnostics_.slaves[current_selected_diagnostics_slave_].ports_update_timestamp =
           HighPrecisionClock::now();
