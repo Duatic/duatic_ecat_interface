@@ -173,6 +173,11 @@ struct ESCStatus
   // while the ESC diagnostics are enabled.
   bool error_indication = false;
 
+  // True if the slave's ESC emulates the AL Status (simple slave without
+  // application controller, read once from the PDI Control register at
+  // initialization). Errors of such slaves are not acknowledged.
+  bool device_emulation = false;
+
   // True if the master is currently receiving valid responses from this
   // slave (i.e. it responded and contributed to the working counter on
   // the last cycle). False if the slave is known/configured but not

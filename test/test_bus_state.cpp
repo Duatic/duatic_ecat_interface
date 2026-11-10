@@ -109,14 +109,14 @@ TEST(TransitionTimeout, DefaultsAreTheEtg2000Defaults)
 TEST(AlControlRequest, AcknowledgesAPendingError)
 {
   const auto al_status = static_cast<uint16_t>(EC_STATE_SAFE_OP | EC_STATE_ERROR);
-  EXPECT_EQ(al_control_request(EC_STATE_OPERATIONAL, al_status), EC_STATE_OPERATIONAL | EC_STATE_ACK);
-  EXPECT_EQ(al_control_request(EC_STATE_PRE_OP, al_status), EC_STATE_PRE_OP | EC_STATE_ACK);
+  EXPECT_EQ(al_control_request(EC_STATE_OPERATIONAL, al_status, false), EC_STATE_OPERATIONAL | EC_STATE_ACK);
+  EXPECT_EQ(al_control_request(EC_STATE_PRE_OP, al_status, false), EC_STATE_PRE_OP | EC_STATE_ACK);
 }
 
 TEST(AlControlRequest, IsThePlainStateWithoutError)
 {
   for (const auto state : { EC_STATE_INIT, EC_STATE_PRE_OP, EC_STATE_BOOT, EC_STATE_SAFE_OP, EC_STATE_OPERATIONAL }) {
-    EXPECT_EQ(al_control_request(state, EC_STATE_SAFE_OP), state);
+    EXPECT_EQ(al_control_request(state, EC_STATE_SAFE_OP, false), state);
   }
 }
 
@@ -130,4 +130,17 @@ TEST(AlStatus, StatusCodeIsIgnoredWithoutErrorFlag)
 {
   EXPECT_EQ(valid_al_status_code(EC_STATE_SAFE_OP | EC_STATE_ERROR, 0x001A), 0x001A);
   EXPECT_EQ(valid_al_status_code(EC_STATE_SAFE_OP, 0x001A), 0);
+}
+
+TEST(AlControlRequest, NeverAcknowledgesDevicesWithDeviceEmulation)
+{
+  const auto al_status = static_cast<uint16_t>(EC_STATE_INIT | EC_STATE_ERROR);
+  EXPECT_EQ(al_control_request(EC_STATE_PRE_OP, al_status, true), EC_STATE_PRE_OP);
+}
+
+TEST(PdiControl, DeviceEmulationIsBit0Of0x0141)
+{
+  EXPECT_TRUE(has_device_emulation(0x0100));
+  EXPECT_FALSE(has_device_emulation(0x00FF));
+  EXPECT_FALSE(has_device_emulation(0xFE00));
 }

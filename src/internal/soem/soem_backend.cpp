@@ -153,6 +153,7 @@ struct EthercatBus::BackendImpl
       shutdown();
       throw BackendError("Devices did not reach 'INIT' state - aborting initialization", Backend::SOEM);
     }
+    read_device_emulation();
 
     // The identification is compared while the devices are in Init (ETG.1000.5 slave handler)
     if (const auto mismatches = compare_network(params_.expected_devices, scan()); !mismatches.empty()) {
@@ -794,7 +795,28 @@ struct EthercatBus::BackendImpl
       log_acknowledged_al_status_code(device_id, device.ALstatuscode);
     }
     return ecx_FPWRw(&context_.ecat_port, device.configadr, ECT_REG_ALCTL,
-                     htoes(al_control_request(target_state, device.state)), EC_TIMEOUTRET3) > 0;
+                     htoes(al_control_request(target_state, device.state, device_emulation_[device_id])),
+                     EC_TIMEOUTRET3) > 0;
+  }
+
+  // Reads which devices emulate their AL Status - the ESC loads this from the SII at power-up
+  void read_device_emulation()
+  {
+    device_emulation_.assign(static_cast<std::size_t>(context_.ecatSlavecount_) + 1, false);
+    for (uint16_t i = 1; i <= static_cast<uint16_t>(context_.ecatSlavecount_); i++) {
+      uint16_t pdi_control = 0;
+      if (ecx_FPRD(&context_.ecat_port, context_.ecatSlavelist_[i].configadr, ECT_REG_PDICTL, sizeof(pdi_control),
+                   &pdi_control, EC_TIMEOUTRET) <= 0) {
+        // Without the information the device is treated as before: errors are acknowledged
+        logging::warning(logger_) << "Device id " << i << ": failed to read the PDI control register";
+        continue;
+      }
+      device_emulation_[i] = has_device_emulation(etohs(pdi_control));
+      latest_diagnostics_.slaves[i - 1U].device_emulation = device_emulation_[i];
+      if (device_emulation_[i]) {
+        logging::info(logger_) << "Device id " << i << " emulates its AL Status - errors are not acknowledged";
+      }
+    }
   }
 
   // Logs the AL Status Code acknowledged for a device - only when it changes, as activation re-requests every cycle
@@ -1007,6 +1029,8 @@ private:
   std::mutex state_mutex_;
   // Per device id (index 0 unused), the AL Status Code that was acknowledged last
   std::vector<uint16_t> last_acknowledged_al_status_codes_;
+  // Per device id (index 0 unused), whether the device emulates its AL Status
+  std::vector<bool> device_emulation_;
   // EEPROM access
   std::mutex eeprom_mutex_;
   // Pause between two polls of the eeprom interface, SOEM's EC_LOCALDELAY which it keeps private
