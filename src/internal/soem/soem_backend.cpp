@@ -32,10 +32,11 @@
 
 #include "duatic_ecat_interface/ethercat_bus.hpp"
 
-#include <mutex>     // NOLINT(build/include_order)
-#include <thread>    // NOLINT(build/include_order)
-#include <atomic>    // NOLINT(build/include_order)
-#include <optional>  // NOLINT(build/include_order)
+#include <algorithm>  // NOLINT(build/include_order)
+#include <mutex>      // NOLINT(build/include_order)
+#include <thread>     // NOLINT(build/include_order)
+#include <atomic>     // NOLINT(build/include_order)
+#include <optional>   // NOLINT(build/include_order)
 
 #include <duatic_message_logger/log.hpp>
 
@@ -148,8 +149,8 @@ struct EthercatBus::BackendImpl
     update_bus_state(BusState::Initialized);
 
     // ecx_config_init() does not evaluate whether the devices reached Init
-    if (!wait_for_device_target_state(
-            0, ec_state::EC_STATE_INIT, remaining(init_request_tp + params_.timeout_transition_back_to_init))) {
+    if (!wait_for_device_target_state(0, ec_state::EC_STATE_INIT,
+                                      remaining(init_request_tp + params_.timeout_transition_back_to_init))) {
       shutdown();
       throw BackendError("Devices did not reach 'INIT' state - aborting initialization", Backend::SOEM);
     }
@@ -835,7 +836,14 @@ struct EthercatBus::BackendImpl
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
     const auto timeout_us = static_cast<int>(std::chrono::microseconds(timeout).count());
-    return ecx_statecheck(&context_.context, device_id, target_state, timeout_us) == target_state;
+    if (ecx_statecheck(&context_.context, device_id, target_state, timeout_us) != target_state) {
+      return false;
+    }
+    // Reaching the requested state ends an error episode - a recurring error is logged again
+    if (device_id != 0) {
+      last_acknowledged_al_status_codes_[device_id] = 0;
+    }
+    return true;
   }
 
   void update_device_states()
@@ -1142,6 +1150,11 @@ private:
       }
 
       if (all_in_operational) {
+        {
+          // Reaching Operational ends the error episodes of the activation - a recurring error is logged again
+          std::lock_guard<std::mutex> lock(state_mutex_);
+          std::fill(last_acknowledged_al_status_codes_.begin(), last_acknowledged_al_status_codes_.end(), 0);
+        }
         update_bus_state(BusState::Operational);
       }
 
