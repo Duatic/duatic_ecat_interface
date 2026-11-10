@@ -245,11 +245,11 @@ struct MailboxStatus
 struct ExecutorTimingDiagnostics
 {
   // Last point in time the specific executor thread update has happened
-  HighPrecisionTimeStamp last_update_tp;
+  HighPrecisionTimeStamp last_update_tp{};
   // Interval at which the last update happened
-  std::chrono::microseconds last_update_rate;
+  std::chrono::microseconds last_update_rate{};
   // Amount of time the last update step took
-  std::chrono::microseconds last_update_duration;
+  std::chrono::microseconds last_update_duration{};
   // Average update rate of the executor in Hz
   double average_update_rate{ 0.0 };
   // Average amount of time the update takes in us

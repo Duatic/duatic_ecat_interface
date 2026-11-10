@@ -31,6 +31,7 @@
  */
 
 #pragma once
+#include <atomic>
 #include <thread>
 #include <vector>
 #include <memory>
@@ -69,6 +70,10 @@ public:
     , update_rate_(bus->get_parameters().dc_cycle_time)
     , logger_(logging::get_logger_with_default_sink("SingleBusExecutor"))
   {
+    // The cycle time is the period of the realtime thread, also without distributed clocks
+    if (bus->get_parameters().dc_cycle_time <= std::chrono::nanoseconds{ 0 }) {
+      throw ExecutorError("The bus cycle time (dc_cycle_time) has to be greater than zero to spin the bus");
+    }
   }
 
   ~SingleBusExecutor()
@@ -214,7 +219,8 @@ public:
    */
   std::exception_ptr get_rt_error() const
   {
-    return rt_error_ptr_;
+    // The flag is set after the error, so the error is complete once the flag is visible
+    return has_rt_error() ? rt_error_ptr_ : nullptr;
   }
 
   /**
@@ -222,7 +228,7 @@ public:
    */
   bool has_service_error() const
   {
-    return service_error_occurred_;
+    return service_error_occurred_.load(std::memory_order_acquire);
   }
 
   /**
@@ -230,7 +236,8 @@ public:
    */
   std::exception_ptr get_service_error() const
   {
-    return service_error_ptr_;
+    // The flag is set after the error, so the error is complete once the flag is visible
+    return has_service_error() ? service_error_ptr_ : nullptr;
   }
 
   /**
@@ -253,7 +260,8 @@ private:
   std::jthread service_thread_;
   PrecisionUpdateRate update_rate_;
   logging::Logger logger_;
-  bool spinning_{ false };
+  // Read by other threads through is_spinning() / full_diagnostics()
+  std::atomic_bool spinning_{ false };
 
   alignas(64) ExecutorTimingDiagnostics rt_thread_diagnostics_;
   alignas(64) ExecutorTimingDiagnostics service_thread_diagnostics_;

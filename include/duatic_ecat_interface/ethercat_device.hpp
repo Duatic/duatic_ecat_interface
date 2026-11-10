@@ -196,7 +196,7 @@ public:
   }
 
   // Helper functions for performing sdo read and writes
-  template <typename T>
+  template <SdoValueType T>
   SDOReadValue<T> sdo_read(const SDOIndex index, const SDOSubIndex sub_index = 0)
   {
     if (!bus_) {
@@ -205,7 +205,7 @@ public:
     return bus_->sdo_read<T>(get_device_id(), index, sub_index);
   }
 
-  template <typename T>
+  template <SdoValueType T>
   SDOWriteResult sdo_write(const T value, const SDOIndex index, const SDOSubIndex sub_index = 0)
   {
     if (!bus_) {
@@ -344,20 +344,22 @@ public:
   /**
    * @brief Latest RX PDO write time stamp
    * Obtain the latest point in time when the internal rx pdo copy was written on the bus
-   * @note this function is thread safe (within API usage scheme)
+   * @note this function is thread safe
    */
-  const HighPrecisionTimeStamp& get_last_rx_pdo_write_time() const
+  HighPrecisionTimeStamp get_last_rx_pdo_write_time() const
   {
+    std::lock_guard<PriorityInheritingMutex> lock(pdo_update_mutex_);
     return rx_pdo_last_write_time_;
   }
 
   /**
    * @brief Latest TX PDO read time stamp
    * Obtain the latest point in the time when the internal tx pdo copy was updated from the bus
-   * @note this function is thread safe (within API usage scheme)
+   * @note this function is thread safe
    */
-  const HighPrecisionTimeStamp& get_last_tx_pdo_read_time() const
+  HighPrecisionTimeStamp get_last_tx_pdo_read_time() const
   {
+    std::lock_guard<PriorityInheritingMutex> lock(pdo_update_mutex_);
     return tx_pdo_last_read_time_;
   }
 

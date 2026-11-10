@@ -43,21 +43,21 @@ namespace duatic::ecat_interface
 {
 struct SDOSubEntry
 {
-  SDOSubIndex index;
-  std::string name;
-  DataType data_type;
-  std::size_t size;
+  SDOSubIndex index{};
+  std::string name{};
+  DataType data_type{};
+  std::size_t size{};
 };
 
 struct SDOEntry
 {
-  SDOIndex index;
-  SDOObjectCode obj_type;
-  DataType data_type;
-  std::size_t count_sub_indices;
-  std::string name;
+  SDOIndex index{};
+  SDOObjectCode obj_type{};
+  DataType data_type{};
+  std::size_t count_sub_indices{};
+  std::string name{};
 
-  std::vector<SDOSubEntry> sub_entries;
+  std::vector<SDOSubEntry> sub_entries{};
 };
 
 /**

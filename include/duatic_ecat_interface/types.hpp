@@ -61,12 +61,12 @@ constexpr std::size_t maximum_visible_string_size = 255;
 // Always available information in an ethercat device
 struct DeviceInfo
 {
-  DeviceId id;
-  std::string name;
-  uint32_t vendor_id;
-  uint32_t product_id;
-  uint32_t revision;
-  bool has_dc;
+  DeviceId id{};
+  std::string name{};
+  uint32_t vendor_id{};
+  uint32_t product_id{};
+  uint32_t revision{};
+  bool has_dc{};
 };
 
 inline std::string to_string(const DeviceInfo& device)
@@ -93,9 +93,9 @@ inline std::ostream& operator<<(std::ostream& os, const DeviceInfo& device)
 // A device the network is configured to have at a given position on the bus
 struct ExpectedDevice
 {
-  DeviceId id;
-  uint32_t vendor_id;
-  uint32_t product_id;
+  DeviceId id{};
+  uint32_t vendor_id{};
+  uint32_t product_id{};
   // Any revision is accepted when not set
   std::optional<uint32_t> revision{};
 };

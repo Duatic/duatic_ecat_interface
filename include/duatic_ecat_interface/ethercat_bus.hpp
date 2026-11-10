@@ -299,7 +299,7 @@ public:
    * @brief write_rx_pdo - write raw data of the rx pdo (rx -> direction the device receives)
    * @note thread safe
    */
-  void write_rx_pdo(const DeviceId device_id, const std::vector<uint8_t>& data);
+  void write_rx_pdo(const DeviceId device_id, std::span<const uint8_t> data);
   /**
    * @brief read_tx_pdo - read raw data of the tx pdo (tx -> direction the device transmits)
    * @note thread safe
@@ -330,7 +330,7 @@ public:
    * @note thread safe
    */
   RegisterReadResult read_register_untyped(std::span<uint8_t> data, const DeviceId device_id,
-                                           const RegisterAddress address, bool check_size = true);
+                                           const RegisterAddress address);
   /**
    * @brief write_register_untyped - perform a blocking write to the specified ESC register
    * @note thread safe
@@ -339,7 +339,7 @@ public:
                                              const RegisterAddress address);
 
   template <EthercatValueType T>
-  RegisterReadValue<T> register_read(const DeviceId device_id, const RegisterAddress address, bool check_size = true);
+  RegisterReadValue<T> register_read(const DeviceId device_id, const RegisterAddress address);
   template <EthercatValueType T>
   bool register_write(const DeviceId device_id, const RegisterAddress address, const T data);
 
@@ -395,7 +395,7 @@ private:
 template <>
 SDOReadValue<std::string> EthercatBus::sdo_read<std::string>(DeviceId device_id, SDOIndex index, SDOSubIndex sub_index);
 template <>
-SDOWriteResult EthercatBus::sdo_write<std::string>(DeviceId device_id, const std::string data, SDOIndex index,
+SDOWriteResult EthercatBus::sdo_write<std::string>(DeviceId device_id, const std::string value, SDOIndex index,
                                                    SDOSubIndex sub_index);
 
 }  // namespace duatic::ecat_interface
