@@ -642,7 +642,7 @@ struct EthercatBus::BackendImpl
                        .has_dc = static_cast<bool>(context_.ecatSlavelist_[device_id].hasdc) };
   }
 
-  std::vector<uint8_t> read_rx_pdo(const DeviceId device_id) const
+  void read_rx_pdo(const DeviceId device_id, std::span<uint8_t> data) const
   {
     if (get_bus_state() == BusState::PreInit || get_bus_state() == BusState::Initialized) {
       throw BackendError("Cannot access pdo for device - pdo needs to be configured first");
@@ -652,13 +652,12 @@ struct EthercatBus::BackendImpl
     }
 
     const auto size = context_.ecatSlavelist_[device_id].Obytes;
-
-    std::vector<uint8_t> result(size, 0);
+    if (data.size() != static_cast<std::size_t>(size)) {
+      throw BackendError("Critical array size mismatch when reading rx pdo", Backend::SOEM);
+    }
 
     std::lock_guard<PriorityInheritingMutex> lock(pdo_update_mutex_);
-    std::memcpy(result.data(), context_.ecatSlavelist_[device_id].outputs, size);
-
-    return result;
+    std::memcpy(data.data(), context_.ecatSlavelist_[device_id].outputs, size);
   }
 
   void write_rx_pdo(const DeviceId device_id, std::span<const uint8_t> data)
@@ -1621,7 +1620,7 @@ std::vector<std::string> EthercatBus::list_interfaces()
 
   adapter = ec_find_adapters();
   if (!adapter)
-    throw std::runtime_error("Error calling ec_find_adapters");
+    throw BackendError("Error calling ec_find_adapters", Backend::SOEM);
 
   std::vector<std::string> result;
 
@@ -1645,9 +1644,9 @@ DeviceInfo EthercatBus::scan(const DeviceId device_id)
   return impl_->scan(device_id);
 }
 
-std::vector<uint8_t> EthercatBus::read_rx_pdo(const DeviceId device_id) const
+void EthercatBus::read_rx_pdo(const DeviceId device_id, std::span<uint8_t> data) const
 {
-  return impl_->read_rx_pdo(device_id);
+  impl_->read_rx_pdo(device_id, data);
 }
 
 void EthercatBus::write_rx_pdo(const DeviceId device_id, std::span<const uint8_t> data)
@@ -1827,28 +1826,24 @@ template RegisterReadValue<float> EthercatBus::register_read<float>(DeviceId, Re
 template RegisterReadValue<double> EthercatBus::register_read<double>(DeviceId, RegisterAddress);
 
 template <EthercatValueType T>
-bool EthercatBus::register_write(const DeviceId device_id, const RegisterAddress address, const T data)
+RegisterWriteResult EthercatBus::register_write(const DeviceId device_id, const RegisterAddress address, const T data)
 {
   // Call by value makes this function safer in case the call needs to be queued
   std::span<const uint8_t> data_wrap(reinterpret_cast<const uint8_t*>(&data), sizeof(T));
-  const auto result = write_register_untyped(data_wrap, device_id, address);
-  if (!result) {
-    return false;
-  }
-  return true;
+  return write_register_untyped(data_wrap, device_id, address);
 }
 
-template bool EthercatBus::register_write<bool>(DeviceId, RegisterAddress, const bool);
-template bool EthercatBus::register_write<uint8_t>(DeviceId, RegisterAddress, const uint8_t);
-template bool EthercatBus::register_write<int8_t>(DeviceId, RegisterAddress, const int8_t);
-template bool EthercatBus::register_write<uint16_t>(DeviceId, RegisterAddress, const uint16_t);
-template bool EthercatBus::register_write<int16_t>(DeviceId, RegisterAddress, const int16_t);
-template bool EthercatBus::register_write<uint32_t>(DeviceId, RegisterAddress, const uint32_t);
-template bool EthercatBus::register_write<int32_t>(DeviceId, RegisterAddress, const int32_t);
-template bool EthercatBus::register_write<uint64_t>(DeviceId, RegisterAddress, const uint64_t);
-template bool EthercatBus::register_write<int64_t>(DeviceId, RegisterAddress, const int64_t);
-template bool EthercatBus::register_write<float>(DeviceId, RegisterAddress, const float);
-template bool EthercatBus::register_write<double>(DeviceId, RegisterAddress, const double);
+template RegisterWriteResult EthercatBus::register_write<bool>(DeviceId, RegisterAddress, const bool);
+template RegisterWriteResult EthercatBus::register_write<uint8_t>(DeviceId, RegisterAddress, const uint8_t);
+template RegisterWriteResult EthercatBus::register_write<int8_t>(DeviceId, RegisterAddress, const int8_t);
+template RegisterWriteResult EthercatBus::register_write<uint16_t>(DeviceId, RegisterAddress, const uint16_t);
+template RegisterWriteResult EthercatBus::register_write<int16_t>(DeviceId, RegisterAddress, const int16_t);
+template RegisterWriteResult EthercatBus::register_write<uint32_t>(DeviceId, RegisterAddress, const uint32_t);
+template RegisterWriteResult EthercatBus::register_write<int32_t>(DeviceId, RegisterAddress, const int32_t);
+template RegisterWriteResult EthercatBus::register_write<uint64_t>(DeviceId, RegisterAddress, const uint64_t);
+template RegisterWriteResult EthercatBus::register_write<int64_t>(DeviceId, RegisterAddress, const int64_t);
+template RegisterWriteResult EthercatBus::register_write<float>(DeviceId, RegisterAddress, const float);
+template RegisterWriteResult EthercatBus::register_write<double>(DeviceId, RegisterAddress, const double);
 
 DiagnosticsSnapshot EthercatBus::diagnostics(bool force_update)
 {

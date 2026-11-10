@@ -88,7 +88,7 @@ using EthercatDevicePtr = std::shared_ptr<EthercatDevice>;
  * write_sdo_untyped(..., cb) (non-blocking)         | thread safe
  * sdo_read<T>(...)                                  | thread safe
  * sdo_write<T>(...)                                 | thread safe
- * read_rx_pdo(device_id)                            | thread safe
+ * read_rx_pdo(device_id, data)                      | thread safe
  * write_rx_pdo(device_id, data)                     | thread safe
  * read_tx_pdo(device_id, data)                      | thread safe
  * change_device_state(...)                          | not thread safe
@@ -291,10 +291,10 @@ public:
                            const SDOSubIndex sub_index = 0);
 
   /**
-   * @brief read_rx_pdo - obtain raw pdo data of the rx pdo (rx -> direction the device receives)
+   * @brief read_rx_pdo - read raw data of the rx pdo (rx -> direction the device receives)
    * @note thread safe
    */
-  std::vector<uint8_t> read_rx_pdo(const DeviceId device_id) const;
+  void read_rx_pdo(const DeviceId device_id, std::span<uint8_t> data) const;
   /**
    * @brief write_rx_pdo - write raw data of the rx pdo (rx -> direction the device receives)
    * @note thread safe
@@ -341,7 +341,7 @@ public:
   template <EthercatValueType T>
   RegisterReadValue<T> register_read(const DeviceId device_id, const RegisterAddress address);
   template <EthercatValueType T>
-  bool register_write(const DeviceId device_id, const RegisterAddress address, const T data);
+  RegisterWriteResult register_write(const DeviceId device_id, const RegisterAddress address, const T data);
 
   /**
    * @brief read_eeprom_untyped - perform a blocking read of the device's EEPROM (SII), starting at a word address
