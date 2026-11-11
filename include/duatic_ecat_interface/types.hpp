@@ -90,6 +90,16 @@ inline std::ostream& operator<<(std::ostream& os, const DeviceInfo& device)
   return os << to_string(device);
 }
 
+// A device the network is configured to have at a given position on the bus
+struct ExpectedDevice
+{
+  DeviceId id;
+  uint32_t vendor_id;
+  uint32_t product_id;
+  // Any revision is accepted when not set
+  std::optional<uint32_t> revision{};
+};
+
 // Representation of ethercat device states
 enum class EthercatDeviceState
 {
@@ -155,6 +165,21 @@ struct RegisterReadResult
 
 template <typename T>
 using RegisterReadValue = ValueDiagnosticsWrapper<T, RegisterReadResult>;
+
+// EEPROM (SII) access types, the EEPROM is addressed in 16 bit words
+using EepromWordAddress = uint16_t;
+
+struct EepromReadResult
+{
+  bool success{ false };
+  std::size_t actual_size_read{ 0 };
+  std::span<const uint8_t> data{};
+
+  explicit operator bool() const
+  {
+    return success;
+  }
+};
 
 // CoE types
 using SDOIndex = uint16_t;
