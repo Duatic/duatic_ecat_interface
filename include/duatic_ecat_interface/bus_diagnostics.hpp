@@ -43,7 +43,7 @@
 namespace duatic::ecat_interface
 {
 
-enum class DiagnosticsLevel
+enum class DiagnosticsLevel : uint8_t
 {
   // Diagnostics is disabled completely
   Off = 0,
@@ -65,7 +65,7 @@ struct DiagnosticsOptions
     esc_port_diagnostics = level;
   }
 
-  // PDO related basic diagnostics such as WKC mismatcheds, lost frames, and total frames sent
+  // PDO related basic diagnostics such as WKC mismatches, lost frames, and total frames sent
   DiagnosticsLevel pdo_diagnostics{ DiagnosticsLevel::Basic };
   // Mailbox logging (Basic: emergencies, Tracing: every event) and the polling of the input mailboxes for emergencies
   // in update_service() - Off disables the polling, unsolicited messages then only arrive during accesses
@@ -87,15 +87,17 @@ constexpr bool is_diagnostics_enabled(const DiagnosticsLevel level)
   return level != DiagnosticsLevel::Off;
 }
 
-// AL Status Code as defined by ETG.1000/ETG.1020 — the vendor-independent
-// reason code a slave reports alongside its state (e.g. why it refused a
-// state transition). 0x0000 conventionally means "no error".
-using AlStatus = uint16_t;
+// AL Status Code (register 0x0134) as defined by ETG.1000/ETG.1020 — the
+// vendor-independent reason code a slave reports alongside its AL Status
+// (e.g. why it refused a state transition). 0x0000 means "no error".
+using ALStatusCode = uint16_t;
 
-// Decodes an AlStatus into a human-readable description via a static
-// ETG.1020 lookup table. Unknown/vendor-specific codes should return a
-// generic "unknown (0x....)" string rather than throwing.
-std::string to_string(const AlStatus& status);
+// Decodes an ALStatusCode into a human-readable description via a static
+// ETG.1020 lookup table. Unknown/vendor-specific codes return a generic
+// description rather than throwing.
+// Named explicitly (no to_string overload): ALStatusCode is a plain uint16_t,
+// an overload would also match every DeviceId, SDOIndex or RegisterAddress
+std::string al_status_code_to_string(ALStatusCode code);
 
 // Per-port health of a slave's ESC (EtherCAT Slave Controller). Sourced
 // directly from ESC DL-layer registers (DL Status, RX Error Counters) —
@@ -154,7 +156,7 @@ struct ESCStatus
 {
   // The slave's position in the bus ring (auto-increment address order).
   // Used to correlate this entry with the slave's configuration.
-  uint16_t position = 0;
+  DeviceId position = 0;
 
   // Current EtherCAT state machine (ESM) state of this slave, as reported
   // in its AL Status register.
@@ -164,12 +166,12 @@ struct ESCStatus
   // its current state, particularly relevant after a fault or a rejected
   // state transition request. Only valid while `error_indication` is set,
   // 0 otherwise (ETG.1000.6: the master shall ignore it then).
-  AlStatus al_status{};
+  ALStatusCode al_status_code{};
 
   // Error Flag of the AL Status: the slave refused a requested state
   // transition or left a state on its own due to an error. The master
   // acknowledges it with the next state change requested for this slave.
-  // Like `state` and `al_status` it is only refreshed after activation
+  // Like `state` and `al_status_code` it is only refreshed after activation
   // while the ESC diagnostics are enabled.
   bool error_indication = false;
 
@@ -189,7 +191,7 @@ struct ESCStatus
   // unused ports simply report link_up == false.
   std::array<ESCPortHealth, 4> ports{};
 
-  // As the ESC diagnostics is costly to read we maintain seperate timestamps
+  // As the ESC diagnostics is costly to read we maintain separate timestamps
   // for the port diagnostics
   HighPrecisionTimeStamp ports_update_timestamp;
 
@@ -205,7 +207,7 @@ struct BusStatus
   // Physical link state of the master's own network interface (nic::is_up(): administratively
   // up per SIOCGIFFLAGS, not a carrier/cable-present check). Distinct from any slave's
   // ESCPortHealth::link_up. Captured once at initialize(), then refreshed every service-thread
-  // tick (~every service_thread_update_rate, 2 ms by default) for as long as a SingleBusExecutor
+  // tick (~every service_thread_period, 2 ms by default) for as long as a SingleBusExecutor
   // is spinning - a cable pulled mid-run will show up here within about one tick. If no executor
   // is ever spun (e.g. a bus used only for scan()/SDO access), this stays at its
   // initialize()-time value.
@@ -235,21 +237,21 @@ struct BusStatus
 // BusStatus's counters above). Every event is counted, independent of the mailbox_diagnostics level.
 struct MailboxStatus
 {
-  uint64_t mailbox_aborts = 0;
-  uint64_t mailbox_timeouts = 0;
-  uint64_t mailbox_emergencies = 0;
+  uint64_t aborts = 0;
+  uint64_t timeouts = 0;
+  uint64_t emergencies = 0;
   // Events dropped from the full EthercatBus::pop_mailbox_events() queue
-  uint64_t mailbox_events_dropped = 0;
+  uint64_t events_dropped = 0;
 };
 
 struct ExecutorTimingDiagnostics
 {
   // Last point in time the specific executor thread update has happened
-  HighPrecisionTimeStamp last_update_tp;
+  HighPrecisionTimeStamp last_update_tp{};
   // Interval at which the last update happened
-  std::chrono::microseconds last_update_rate;
+  std::chrono::microseconds last_update_period{};
   // Amount of time the last update step took
-  std::chrono::microseconds last_update_duration;
+  std::chrono::microseconds last_update_duration{};
   // Average update rate of the executor in Hz
   double average_update_rate{ 0.0 };
   // Average amount of time the update takes in us
@@ -258,16 +260,18 @@ struct ExecutorTimingDiagnostics
   // This is optional and only relevant for the RT thread
   std::optional<std::chrono::nanoseconds> accumulated_delay;
   // Amount of missed timing deadlines
-  // This is optional and onyl relevant for the RT thread
+  // This is optional and only relevant for the RT thread
   std::optional<uint64_t> missed_rate_steps;
-  // indicate if the specific executor thread is running
+  // indicate if the loop of this specific executor thread is running (false again once it ended, e.g. after an
+  // error) - unlike ExecutionStatus::is_spinning, which only tells that the executor was started
   bool is_running{ false };
 };
 
 // Executor diagnostics which is added by the executor to a diagnostics snapshot
 struct ExecutionStatus
 {
-  // Indicate whether the executor is currently running
+  // Indicate whether the executor has been started (spin() called, stop() not yet) - see
+  // ExecutorTimingDiagnostics::is_running for whether its threads are actually alive
   bool is_spinning = false;
   // Statistics for the realtime thread
   ExecutorTimingDiagnostics rt_thread_stats;

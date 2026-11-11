@@ -36,6 +36,7 @@
 #include <sched.h>
 #include <unistd.h>
 #include <csignal>
+#include <thread>
 
 #include <duatic_message_logger/log.hpp>
 
@@ -45,11 +46,11 @@ namespace duatic::ecat_interface
  * @brief set_realtime_priority - try to configure the passed thread to have higher priorities and behave more rt
  * capable therefore
  * @param thread - the thread to configure
- * @param priority - the thread prioty between [1-99] with 99 beeing the highest priority
- * @param cpu_coure - the cpu core to tie this thread to. Pass -1 to keep the default
+ * @param priority - the thread priority between [1-99] with 99 being the highest priority
+ * @param cpu_core - the cpu core to tie this thread to. Pass -1 to keep the default
  * @param scheduler - the scheduler type to choose for this thread. Reasonable options are [SCHED_FIFO, SCHED_RR]
  *
- * This function tries to make the passed thread more realtimy by doing three things:
+ * This function tries to make the passed thread more realtime capable by doing three things:
  * 1. Configure the scheduler to a more realtime like scheduler. E.g. SCHED_FIFO
  * 2. Increase the priority of the thread
  * 3. Bind the thread to a specific core. This avoids overhead by moving the thread between cores (cache misses)
@@ -101,7 +102,7 @@ inline bool set_realtime_priority(pthread_t thread, int priority = 60, int cpu_c
 
 /**
  * @brief set_realtime_priority - variant which configures the current thread
- * See set_realtime_priority with pthread parameter for the full explaination
+ * See set_realtime_priority with pthread parameter for the full explanation
  */
 inline bool set_realtime_priority(int priority = 60, int cpu_core = -1, int scheduler = SCHED_FIFO)
 {
@@ -159,5 +160,19 @@ inline bool restore_signal_mask(const sigset_t& mask)
     return false;
   }
   return true;
+}
+
+/**
+ * @brief lock_by_polling - acquire a mutex the realtime thread only try_locks, by polling try_lock
+ * A thread waiting on the mutex in the kernel would force the realtime thread's next unlock into a futex wake syscall,
+ * therefore every other thread polls instead. The mutex is only held for short copies, so the poll is short
+ * @note only for threads with a lower priority than the realtime thread (service thread, consumers of the diagnostics)
+ */
+template <typename Mutex>
+void lock_by_polling(Mutex& mutex)
+{
+  while (!mutex.try_lock()) {
+    std::this_thread::yield();
+  }
 }
 }  // namespace duatic::ecat_interface

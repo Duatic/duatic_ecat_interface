@@ -84,7 +84,7 @@ void handle_sdo(const std::string& interface, const bool read_sdos)
       std::cout << "  [" << std::hex << "0x" << sdo.index << std::dec << "]"
                 << ": " << sdo.name << std::endl;
 
-      std::cout << "   object type: " << sdo.obj_type << std::endl;
+      std::cout << "   object type: " << sdo.object_code << std::endl;
       if (sdo.sub_entries.empty()) {
         std::cout << "   data type: " << sdo.data_type << std::endl;
         if (read_sdos) {

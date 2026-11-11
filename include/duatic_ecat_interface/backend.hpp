@@ -32,18 +32,21 @@
 
 #pragma once
 
+#include <cstdint>
+#include <ostream>
 #include <string>
 
 namespace duatic::ecat_interface
 {
 
 /**
- * @brief Idenditier for the active (compiled in backend)
+ * @brief Identifier of the active (compiled in) backend
  */
-enum class Backend
+enum class Backend : uint8_t
 {
   Unknown = 0,
   SOEM = 1,
+  // Reserved for an Etherlab backend, not implemented yet
   Etherlab = 2
 };
 

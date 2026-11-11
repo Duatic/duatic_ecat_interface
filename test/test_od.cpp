@@ -41,14 +41,14 @@ std::vector<SDOEntry> make_sample_entries()
 {
   SDOEntry mode;
   mode.index = 0x6060;
-  mode.obj_type = SDOObjectCode::Var;
+  mode.object_code = SDOObjectCode::Var;
   mode.data_type = DataType::INTEGER8;
   mode.count_sub_indices = 0;
   mode.name = "modes_of_operation";
 
   SDOEntry status;
   status.index = 0x6041;
-  status.obj_type = SDOObjectCode::Var;
+  status.object_code = SDOObjectCode::Var;
   status.data_type = DataType::UNSIGNED16;
   status.count_sub_indices = 0;
   status.name = "statusword";

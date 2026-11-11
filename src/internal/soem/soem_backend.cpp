@@ -46,6 +46,7 @@
 
 #include "duatic_ecat_interface/object_dictionary.hpp"
 #include "duatic_ecat_interface/priority_inheriting_mutex.hpp"
+#include "duatic_ecat_interface/realtime_utils.hpp"
 
 #include "duatic_ecat_interface/internal/backend_impl.hpp"
 #include "duatic_ecat_interface/internal/soem/soem_context.hpp"
@@ -60,10 +61,10 @@ namespace duatic::ecat_interface
 
 using namespace internal::soem;  // NOLINT(build/namespaces)
 
-// Helper function to convert the AlStatus into a human readable string
-std::string to_string(const AlStatus& status)
+// Helper function to convert the ALStatusCode into a human readable string
+std::string al_status_code_to_string(const ALStatusCode code)
 {
-  return std::string(ec_ALstatuscode2string(status));
+  return std::string(ec_ALstatuscode2string(code));
 }
 
 struct EthercatBus::BackendImpl
@@ -72,7 +73,7 @@ struct EthercatBus::BackendImpl
     : params_(params)
     , owner_(owner)
     , logger_(logging::get_logger_with_default_sink("SOEM-Backend"))
-    , dc_sync_(params.dc_cycle_time, params_.master_send_offset)
+    , dc_sync_(params.cycle_time, params_.master_send_offset)
   {
   }
 
@@ -176,7 +177,9 @@ struct EthercatBus::BackendImpl
 
     // SOEM style iteration - we need to start at 1 because 0 is the master
     for (int i = 1; i < device_count + 1; i++) {
-      devices_.emplace_back(std::make_shared<EthercatDevice>(owner_, scan(static_cast<DeviceId>(i))));
+      // The constructor is private to the bus, which std::make_shared cannot reach
+      devices_.emplace_back(
+          std::shared_ptr<EthercatDevice>(new EthercatDevice(owner_, scan(static_cast<DeviceId>(i)))));
     }
 
     return device_count;
@@ -185,7 +188,7 @@ struct EthercatBus::BackendImpl
   std::shared_ptr<EthercatDevice> acquire_device(const DeviceId device_id)
   {
     if (get_bus_state() != BusState::Initialized) {
-      throw BackendError("You may only aquire devices in the bus state: 'Initialized'", Backend::SOEM);
+      throw BackendError("You may only acquire devices in the bus state: 'Initialized'", Backend::SOEM);
     }
     if (!has_device(device_id)) {
       throw DeviceNotFound("Device with id: " + std::to_string(device_id) + " not found on the bus", Backend::SOEM);
@@ -195,7 +198,7 @@ struct EthercatBus::BackendImpl
                                      [device_id](const auto& d) { return d->get_device_id() == device_id; });
 
     if (device == devices_.end()) {
-      throw BackendError("Backend error - inconstent device states in list", Backend::SOEM);
+      throw BackendError("Backend error - inconsistent device states in list", Backend::SOEM);
     }
 
     return *device;
@@ -244,9 +247,10 @@ struct EthercatBus::BackendImpl
                               << ", SID 0x" << std::setfill('0') << std::setw(2) << std::hex
                               << static_cast<uint16_t>(sub_index)
                               << "): " << (event ? event->description : "unknown reason") << std::endl;
-      return SDOReadResult{
-        .success = false, .actual_size_read = actual_size, .working_counter = wkc, .mailbox_diagnostics = event
-      };
+      return SDOReadResult{ .success = false,
+                            .actual_size_read = static_cast<std::size_t>(std::max(actual_size, 0)),
+                            .working_counter = wkc,
+                            .mailbox_diagnostics = event };
     }
 
     if (check_size && requested_size != actual_size) {
@@ -257,9 +261,10 @@ struct EthercatBus::BackendImpl
                               << ")." << std::endl;
       throw BackendError("SDORead size mismatch", Backend::SOEM, actual_size);
     }
-    return SDOReadResult{
-      .success = true, .actual_size_read = actual_size, .working_counter = wkc, .mailbox_diagnostics = event
-    };
+    return SDOReadResult{ .success = true,
+                          .actual_size_read = static_cast<std::size_t>(std::max(actual_size, 0)),
+                          .working_counter = wkc,
+                          .mailbox_diagnostics = event };
   }
 
   void read_sdo_untyped_async(const SDOReadCallback& cb, std::span<uint8_t> data, const DeviceId device_id,
@@ -379,7 +384,7 @@ struct EthercatBus::BackendImpl
     if (params_.dc_enabled) {
       for (uint16_t i = 1; i <= static_cast<uint16_t>(context_.ecatSlavecount_); i++) {
         if (context_.ecatSlavelist_[i].hasdc) {
-          ecx_dcsync0(&context_.context, i, true, static_cast<uint32_t>(params_.dc_cycle_time.count()),
+          ecx_dcsync0(&context_.context, i, true, static_cast<uint32_t>(params_.cycle_time.count()),
                       static_cast<int32_t>(params_.dc_sync0_shift.count()));
         }
       }
@@ -437,7 +442,7 @@ struct EthercatBus::BackendImpl
     // Bus is now in activated state so the update method knows that it needs to push devices into OPERATIONAL first
     update_bus_state(BusState::Activated);
 
-    // Give the devices the chance to perfrom any last steps before the operational stage starts
+    // Give the devices the chance to perform any last steps before the operational stage starts
     for (auto& device : devices_) {
       device->on_post_activate();
     }
@@ -558,7 +563,7 @@ struct EthercatBus::BackendImpl
       SDOEntry entry{};
       ecx_readODdescription(&context_.context, static_cast<uint16_t>(i), &od_list);
       entry.index = static_cast<SDOIndex>(od_list.Index[i]);
-      entry.obj_type = static_cast<SDOObjectCode>(od_list.ObjectCode[i]);
+      entry.object_code = static_cast<SDOObjectCode>(od_list.ObjectCode[i]);
       entry.data_type = static_cast<DataType>(od_list.DataType[i]);
       entry.count_sub_indices = static_cast<std::size_t>(od_list.MaxSub[i]);
       entry.name = od_list.Name[i];
@@ -571,7 +576,7 @@ struct EthercatBus::BackendImpl
     if (full_read) {
       for (auto& obj : result) {
         // Var types do now have sub objects
-        if (obj.obj_type == SDOObjectCode::Var) {
+        if (obj.object_code == SDOObjectCode::Var) {
           continue;
         }
         // Clear previous subentries just in case
@@ -642,7 +647,7 @@ struct EthercatBus::BackendImpl
                        .has_dc = static_cast<bool>(context_.ecatSlavelist_[device_id].hasdc) };
   }
 
-  std::vector<uint8_t> read_rx_pdo(const DeviceId device_id) const
+  void read_rx_pdo(const DeviceId device_id, std::span<uint8_t> data) const
   {
     if (get_bus_state() == BusState::PreInit || get_bus_state() == BusState::Initialized) {
       throw BackendError("Cannot access pdo for device - pdo needs to be configured first");
@@ -652,16 +657,15 @@ struct EthercatBus::BackendImpl
     }
 
     const auto size = context_.ecatSlavelist_[device_id].Obytes;
-
-    std::vector<uint8_t> result(size, 0);
+    if (data.size() != static_cast<std::size_t>(size)) {
+      throw BackendError("Critical array size mismatch when reading rx pdo", Backend::SOEM);
+    }
 
     std::lock_guard<PriorityInheritingMutex> lock(pdo_update_mutex_);
-    std::memcpy(result.data(), context_.ecatSlavelist_[device_id].outputs, size);
-
-    return result;
+    std::memcpy(data.data(), context_.ecatSlavelist_[device_id].outputs, size);
   }
 
-  void write_rx_pdo(const DeviceId device_id, const std::vector<uint8_t>& data)
+  void write_rx_pdo(const DeviceId device_id, std::span<const uint8_t> data)
   {
     if (get_bus_state() == BusState::PreInit || get_bus_state() == BusState::Initialized) {
       throw BackendError("Cannot access pdo for device - pdo needs to be configured first");
@@ -753,12 +757,12 @@ struct EthercatBus::BackendImpl
       logging::error(logger_) << "Device id " << device_id << ": FoE read of \"" << file_name << "\" failed, wkc "
                               << wkc << ": " << (event ? event->description : "unknown reason") << std::endl;
       return FoEReadValue(FoEReadResult{
-          .success = false, .working_counter = wkc, .actual_read_size = 0, .mailbox_diagnostics = event });
+          .success = false, .working_counter = wkc, .actual_size_read = 0, .mailbox_diagnostics = event });
     }
 
     return FoEReadValue(FoEReadResult{ .success = true,
                                        .working_counter = wkc,
-                                       .actual_read_size = static_cast<std::size_t>(
+                                       .actual_size_read = static_cast<std::size_t>(
                                            std::min(static_cast<std::size_t>(actual_size), buffer.size())),
 
                                        .mailbox_diagnostics = event },
@@ -827,8 +831,8 @@ struct EthercatBus::BackendImpl
       return;
     }
     last_acknowledged_al_status_codes_[device_id] = al_status_code;
-    logging::warning(logger_) << "Device " << device_id << " reports the AL error '" << to_string(al_status_code)
-                              << "' - acknowledging it";
+    logging::warning(logger_) << "Device " << device_id << " reports the AL error '"
+                              << al_status_code_to_string(al_status_code) << "' - acknowledging it";
   }
 
   bool wait_for_device_target_state(const DeviceId device_id, ec_state target_state,
@@ -860,7 +864,7 @@ struct EthercatBus::BackendImpl
   }
 
   RegisterReadResult read_register_untyped(std::span<uint8_t> data, const DeviceId device_id,
-                                           const RegisterAddress address, [[maybe_unused]] bool check_size)
+                                           const RegisterAddress address)
   {
     // Only perform operations on an initialized bus
     if (get_bus_state() == BusState::PreInit || get_bus_state() == BusState::Shutdown) {
@@ -985,7 +989,9 @@ struct EthercatBus::BackendImpl
       update_diagnostics_slow();
       snapshot = latest_diagnostics_;
     } else {
-      std::lock_guard<std::mutex> lock(diagnostics_mutex_);
+      // The RT thread only try_locks the diagnostics, a sleeping waiter would force its unlock into a syscall
+      lock_by_polling(diagnostics_mutex_);
+      std::lock_guard<std::mutex> lock(diagnostics_mutex_, std::adopt_lock);
       snapshot = latest_diagnostics_;
     }
 
@@ -1201,7 +1207,7 @@ private:
       for (uint16_t i = 0; i < static_cast<uint16_t>(context_.ecatSlavecount_); i++) {
         latest_diagnostics_.slaves[i].position = i + 1;
         const uint16_t al_status = context_.ecatSlavelist_[i + 1].state;
-        latest_diagnostics_.slaves[i].al_status =
+        latest_diagnostics_.slaves[i].al_status_code =
             valid_al_status_code(al_status, context_.ecatSlavelist_[i + 1].ALstatuscode);
         latest_diagnostics_.slaves[i].error_indication = has_error_indication(al_status);
         latest_diagnostics_.slaves[i].state = map_from_soem_device_state(static_cast<ec_state>(al_status & 0x0F));
@@ -1225,7 +1231,8 @@ private:
     // result, consistent with its role for the rest of latest_diagnostics_.slaves (see
     // update_diagnostics_fast()) - never held across the register reads above.
     {
-      std::lock_guard<std::mutex> lock(diagnostics_mutex_);
+      lock_by_polling(diagnostics_mutex_);
+      std::lock_guard<std::mutex> lock(diagnostics_mutex_, std::adopt_lock);
       latest_diagnostics_.slaves[current_selected_diagnostics_slave_].ports = ports;
       latest_diagnostics_.slaves[current_selected_diagnostics_slave_].ports_update_timestamp =
           HighPrecisionClock::now();
@@ -1442,7 +1449,7 @@ private:
     std::lock_guard<std::mutex> lock(mailbox_status_mutex_);
     if (unsolicited_events_.size() == max_unsolicited_events) {
       unsolicited_events_.erase(unsolicited_events_.begin());
-      mailbox_status_.mailbox_events_dropped += 1;
+      mailbox_status_.events_dropped += 1;
     }
     unsolicited_events_.push_back(std::move(ev));
   }
@@ -1453,10 +1460,10 @@ private:
       std::lock_guard<std::mutex> lock(mailbox_status_mutex_);
       switch (ev.kind) {
         case MailboxEventKind::Emergency:
-          mailbox_status_.mailbox_emergencies += 1;
+          mailbox_status_.emergencies += 1;
           break;
         case MailboxEventKind::Timeout:
-          mailbox_status_.mailbox_timeouts += 1;
+          mailbox_status_.timeouts += 1;
           break;
         case MailboxEventKind::Unknown:
         case MailboxEventKind::Abort:
@@ -1464,7 +1471,7 @@ private:
         case MailboxEventKind::MailboxLayerError:
         case MailboxEventKind::BufferTooSmall:
         case MailboxEventKind::NotFound:
-          mailbox_status_.mailbox_aborts += 1;
+          mailbox_status_.aborts += 1;
           break;
       }
     }
@@ -1621,7 +1628,7 @@ std::vector<std::string> EthercatBus::list_interfaces()
 
   adapter = ec_find_adapters();
   if (!adapter)
-    throw std::runtime_error("Error calling ec_find_adapters");
+    throw BackendError("Error calling ec_find_adapters", Backend::SOEM);
 
   std::vector<std::string> result;
 
@@ -1645,12 +1652,12 @@ DeviceInfo EthercatBus::scan(const DeviceId device_id)
   return impl_->scan(device_id);
 }
 
-std::vector<uint8_t> EthercatBus::read_rx_pdo(const DeviceId device_id) const
+void EthercatBus::read_rx_pdo(const DeviceId device_id, std::span<uint8_t> data) const
 {
-  return impl_->read_rx_pdo(device_id);
+  impl_->read_rx_pdo(device_id, data);
 }
 
-void EthercatBus::write_rx_pdo(const DeviceId device_id, const std::vector<uint8_t>& data)
+void EthercatBus::write_rx_pdo(const DeviceId device_id, std::span<const uint8_t> data)
 {
   impl_->write_rx_pdo(device_id, data);
 }
@@ -1660,7 +1667,7 @@ void EthercatBus::read_tx_pdo(const DeviceId device_id, std::span<uint8_t> data)
   impl_->read_tx_pdo(device_id, data);
 }
 
-template <SdoValueType T>
+template <SDOValueType T>
 SDOReadValue<T> EthercatBus::sdo_read(const DeviceId device_id, const SDOIndex index, const SDOSubIndex sub_index)
 {
   static_assert(!std::is_same_v<T, std::string>);
@@ -1670,7 +1677,7 @@ SDOReadValue<T> EthercatBus::sdo_read(const DeviceId device_id, const SDOIndex i
   std::span<uint8_t> buffer(reinterpret_cast<uint8_t*>(&data), sizeof(T));
 
   const auto result = read_sdo_untyped(buffer, device_id, index, sub_index);
-  // Read was not successfull
+  // Read was not successful
   if (!result) {
     return SDOReadValue<T>(result);
   }
@@ -1683,7 +1690,7 @@ SDOReadValue<std::string> EthercatBus::sdo_read<std::string>(const DeviceId devi
 {
   // Create a buffer of the maximum possible string length
   std::vector<char> data(maximum_visible_string_size, 0);
-  // Create a uin8t_t span reprensentation of it
+  // Create a uint8_t span representation of it
   std::span<uint8_t> buffer(reinterpret_cast<uint8_t*>(data.data()), data.size());
   const auto result =
       read_sdo_untyped(buffer, device_id, index, sub_index, false /*do not perform size check for string reads*/);
@@ -1693,8 +1700,7 @@ SDOReadValue<std::string> EthercatBus::sdo_read<std::string>(const DeviceId devi
   }
 
   // Create an std::string out of it
-  const std::string_view raw{ data.data(),
-                              std::min<std::size_t>(static_cast<std::size_t>(result.actual_size_read), data.size()) };
+  const std::string_view raw{ data.data(), std::min<std::size_t>(result.actual_size_read, data.size()) };
   const auto text = raw.substr(0, raw.find('\0'));
   return SDOReadValue<std::string>(result, std::string(text));
 }
@@ -1711,7 +1717,7 @@ template SDOReadValue<int64_t> EthercatBus::sdo_read<int64_t>(DeviceId, SDOIndex
 template SDOReadValue<float> EthercatBus::sdo_read<float>(DeviceId, SDOIndex, SDOSubIndex);
 template SDOReadValue<double> EthercatBus::sdo_read<double>(DeviceId, SDOIndex, SDOSubIndex);
 
-template <SdoValueType T>
+template <SDOValueType T>
 SDOWriteResult EthercatBus::sdo_write(const DeviceId device_id, const T value, const SDOIndex index,
                                       const SDOSubIndex sub_index)
 {
@@ -1782,9 +1788,9 @@ bool EthercatBus::change_device_state(const DeviceId device_id, const EthercatDe
 }
 
 RegisterReadResult EthercatBus::read_register_untyped(std::span<uint8_t> data, const DeviceId device_id,
-                                                      const RegisterAddress address, bool check_size)
+                                                      const RegisterAddress address)
 {
-  return impl_->read_register_untyped(data, device_id, address, check_size);
+  return impl_->read_register_untyped(data, device_id, address);
 }
 
 RegisterWriteResult EthercatBus::write_register_untyped(std::span<const uint8_t> data, const DeviceId device_id,
@@ -1800,56 +1806,51 @@ EepromReadResult EthercatBus::read_eeprom_untyped(std::span<uint8_t> data, const
 }
 
 template <EthercatValueType T>
-RegisterReadValue<T> EthercatBus::register_read(const DeviceId device_id, const RegisterAddress address,
-                                                bool check_size)
+RegisterReadValue<T> EthercatBus::register_read(const DeviceId device_id, const RegisterAddress address)
 {
   // This is the actual data instance we use
   T data{};
   // And this is just a safe representation (pointer + size) to it
   std::span<uint8_t> buffer(reinterpret_cast<uint8_t*>(&data), sizeof(T));
 
-  const auto result = read_register_untyped(buffer, device_id, address, check_size);
+  const auto result = read_register_untyped(buffer, device_id, address);
   if (!result) {
     return RegisterReadValue<T>(result);
   }
   return RegisterReadValue<T>(result, data);
 }
 
-template RegisterReadValue<bool> EthercatBus::register_read<bool>(DeviceId, RegisterAddress, bool);
-template RegisterReadValue<uint8_t> EthercatBus::register_read<uint8_t>(DeviceId, RegisterAddress, bool);
-template RegisterReadValue<int8_t> EthercatBus::register_read<int8_t>(DeviceId, RegisterAddress, bool);
-template RegisterReadValue<uint16_t> EthercatBus::register_read<uint16_t>(DeviceId, RegisterAddress, bool);
-template RegisterReadValue<int16_t> EthercatBus::register_read<int16_t>(DeviceId, RegisterAddress, bool);
-template RegisterReadValue<uint32_t> EthercatBus::register_read<uint32_t>(DeviceId, RegisterAddress, bool);
-template RegisterReadValue<int32_t> EthercatBus::register_read<int32_t>(DeviceId, RegisterAddress, bool);
-template RegisterReadValue<uint64_t> EthercatBus::register_read<uint64_t>(DeviceId, RegisterAddress, bool);
-template RegisterReadValue<int64_t> EthercatBus::register_read<int64_t>(DeviceId, RegisterAddress, bool);
-template RegisterReadValue<float> EthercatBus::register_read<float>(DeviceId, RegisterAddress, bool);
-template RegisterReadValue<double> EthercatBus::register_read<double>(DeviceId, RegisterAddress, bool);
+template RegisterReadValue<bool> EthercatBus::register_read<bool>(DeviceId, RegisterAddress);
+template RegisterReadValue<uint8_t> EthercatBus::register_read<uint8_t>(DeviceId, RegisterAddress);
+template RegisterReadValue<int8_t> EthercatBus::register_read<int8_t>(DeviceId, RegisterAddress);
+template RegisterReadValue<uint16_t> EthercatBus::register_read<uint16_t>(DeviceId, RegisterAddress);
+template RegisterReadValue<int16_t> EthercatBus::register_read<int16_t>(DeviceId, RegisterAddress);
+template RegisterReadValue<uint32_t> EthercatBus::register_read<uint32_t>(DeviceId, RegisterAddress);
+template RegisterReadValue<int32_t> EthercatBus::register_read<int32_t>(DeviceId, RegisterAddress);
+template RegisterReadValue<uint64_t> EthercatBus::register_read<uint64_t>(DeviceId, RegisterAddress);
+template RegisterReadValue<int64_t> EthercatBus::register_read<int64_t>(DeviceId, RegisterAddress);
+template RegisterReadValue<float> EthercatBus::register_read<float>(DeviceId, RegisterAddress);
+template RegisterReadValue<double> EthercatBus::register_read<double>(DeviceId, RegisterAddress);
 
 template <EthercatValueType T>
-bool EthercatBus::register_write(const DeviceId device_id, const RegisterAddress address, const T data)
+RegisterWriteResult EthercatBus::register_write(const DeviceId device_id, const RegisterAddress address, const T data)
 {
   // Call by value makes this function safer in case the call needs to be queued
   std::span<const uint8_t> data_wrap(reinterpret_cast<const uint8_t*>(&data), sizeof(T));
-  const auto result = write_register_untyped(data_wrap, device_id, address);
-  if (!result) {
-    return false;
-  }
-  return true;
+  return write_register_untyped(data_wrap, device_id, address);
 }
 
-template bool EthercatBus::register_write<bool>(DeviceId, RegisterAddress, const bool);
-template bool EthercatBus::register_write<uint8_t>(DeviceId, RegisterAddress, const uint8_t);
-template bool EthercatBus::register_write<int8_t>(DeviceId, RegisterAddress, const int8_t);
-template bool EthercatBus::register_write<uint16_t>(DeviceId, RegisterAddress, const uint16_t);
-template bool EthercatBus::register_write<int16_t>(DeviceId, RegisterAddress, const int16_t);
-template bool EthercatBus::register_write<uint32_t>(DeviceId, RegisterAddress, const uint32_t);
-template bool EthercatBus::register_write<int32_t>(DeviceId, RegisterAddress, const int32_t);
-template bool EthercatBus::register_write<uint64_t>(DeviceId, RegisterAddress, const uint64_t);
-template bool EthercatBus::register_write<int64_t>(DeviceId, RegisterAddress, const int64_t);
-template bool EthercatBus::register_write<float>(DeviceId, RegisterAddress, const float);
-template bool EthercatBus::register_write<double>(DeviceId, RegisterAddress, const double);
+template RegisterWriteResult EthercatBus::register_write<bool>(DeviceId, RegisterAddress, const bool);
+template RegisterWriteResult EthercatBus::register_write<uint8_t>(DeviceId, RegisterAddress, const uint8_t);
+template RegisterWriteResult EthercatBus::register_write<int8_t>(DeviceId, RegisterAddress, const int8_t);
+template RegisterWriteResult EthercatBus::register_write<uint16_t>(DeviceId, RegisterAddress, const uint16_t);
+template RegisterWriteResult EthercatBus::register_write<int16_t>(DeviceId, RegisterAddress, const int16_t);
+template RegisterWriteResult EthercatBus::register_write<uint32_t>(DeviceId, RegisterAddress, const uint32_t);
+template RegisterWriteResult EthercatBus::register_write<int32_t>(DeviceId, RegisterAddress, const int32_t);
+template RegisterWriteResult EthercatBus::register_write<uint64_t>(DeviceId, RegisterAddress, const uint64_t);
+template RegisterWriteResult EthercatBus::register_write<int64_t>(DeviceId, RegisterAddress, const int64_t);
+template RegisterWriteResult EthercatBus::register_write<float>(DeviceId, RegisterAddress, const float);
+template RegisterWriteResult EthercatBus::register_write<double>(DeviceId, RegisterAddress, const double);
 
 DiagnosticsSnapshot EthercatBus::diagnostics(bool force_update)
 {

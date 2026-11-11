@@ -78,8 +78,8 @@ TEST_F(PrecisionUpdateRateTest, InitialState)
   PrecisionUpdateRate rate(10ms);
 
   EXPECT_EQ(rate.overrun_count(), 0u);
-  EXPECT_EQ(rate.accumulated_delay_ns().count(), 0);
-  EXPECT_EQ(rate.last_delay_ns().count(), 0);
+  EXPECT_EQ(rate.accumulated_delay().count(), 0);
+  EXPECT_EQ(rate.last_delay().count(), 0);
 }
 
 // Test single step without overrun
@@ -93,8 +93,8 @@ TEST_F(PrecisionUpdateRateTest, SingleStepNoOverrun)
 
   EXPECT_FALSE(overrun);
   EXPECT_EQ(rate.overrun_count(), 0u);
-  EXPECT_EQ(rate.accumulated_delay_ns().count(), 0);
-  EXPECT_EQ(rate.last_delay_ns().count(), 0);
+  EXPECT_EQ(rate.accumulated_delay().count(), 0);
+  EXPECT_EQ(rate.last_delay().count(), 0);
 
   // Check that approximately 10ms elapsed
   auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -117,8 +117,8 @@ TEST_F(PrecisionUpdateRateTest, MultipleStepsNoOverrun)
   auto end = std::chrono::steady_clock::now();
 
   EXPECT_EQ(rate.overrun_count(), 0u);
-  EXPECT_EQ(rate.accumulated_delay_ns().count(), 0);
-  EXPECT_EQ(rate.last_delay_ns().count(), 0);
+  EXPECT_EQ(rate.accumulated_delay().count(), 0);
+  EXPECT_EQ(rate.last_delay().count(), 0);
 
   // Check that approximately 50ms elapsed (10 steps * 5ms)
   auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -142,11 +142,11 @@ TEST_F(PrecisionUpdateRateTest, StepWithOverrun)
 
   EXPECT_TRUE(overrun);
   EXPECT_EQ(rate.overrun_count(), 1u);
-  EXPECT_GT(rate.accumulated_delay_ns().count(), 0);
-  EXPECT_GT(rate.last_delay_ns().count(), 0);
+  EXPECT_GT(rate.accumulated_delay().count(), 0);
+  EXPECT_GT(rate.last_delay().count(), 0);
 
   // The delay should be approximately 5ms (15ms work - 10ms period)
-  auto delay_ms = std::chrono::duration_cast<std::chrono::milliseconds>(rate.last_delay_ns());
+  auto delay_ms = std::chrono::duration_cast<std::chrono::milliseconds>(rate.last_delay());
   EXPECT_GE(delay_ms.count(), 4);
   EXPECT_LE(delay_ms.count(), 6);
 }
@@ -161,8 +161,8 @@ TEST_F(PrecisionUpdateRateTest, MultipleOverruns)
   // First overrun
   simulate_work(15ms);
   bool overrun1 = rate.step();
-  auto first_delay = rate.last_delay_ns();
-  auto first_accumulated = rate.accumulated_delay_ns();
+  auto first_delay = rate.last_delay();
+  auto first_accumulated = rate.accumulated_delay();
 
   EXPECT_TRUE(overrun1);
   EXPECT_EQ(rate.overrun_count(), 1u);
@@ -171,8 +171,8 @@ TEST_F(PrecisionUpdateRateTest, MultipleOverruns)
   // Second overrun
   simulate_work(12ms);
   bool overrun2 = rate.step();
-  auto second_delay = rate.last_delay_ns();
-  auto second_accumulated = rate.accumulated_delay_ns();
+  auto second_delay = rate.last_delay();
+  auto second_accumulated = rate.accumulated_delay();
 
   EXPECT_TRUE(overrun2);
   EXPECT_EQ(rate.overrun_count(), 2u);
@@ -180,7 +180,7 @@ TEST_F(PrecisionUpdateRateTest, MultipleOverruns)
   EXPECT_EQ(second_accumulated.count(), first_delay.count() + second_delay.count());
 }
 
-// Test that last_delay_ns resets after normal step
+// Test that last_delay resets after normal step
 TEST_F(PrecisionUpdateRateTest, LastDelayResetsAfterNormalStep)
 {
   PrecisionUpdateRate rate(10ms);
@@ -190,15 +190,15 @@ TEST_F(PrecisionUpdateRateTest, LastDelayResetsAfterNormalStep)
   // Cause an overrun
   simulate_work(15ms);
   rate.step();
-  EXPECT_GT(rate.last_delay_ns().count(), 0);
+  EXPECT_GT(rate.last_delay().count(), 0);
   EXPECT_EQ(rate.overrun_count(), 1u);
 
-  // Normal step should reset last_delay_ns to 0
+  // Normal step should reset last_delay to 0
   bool overrun = rate.step();
   EXPECT_FALSE(overrun);
-  EXPECT_EQ(rate.last_delay_ns().count(), 0);
-  EXPECT_EQ(rate.overrun_count(), 1u);                // Count should not increase
-  EXPECT_GT(rate.accumulated_delay_ns().count(), 0);  // But accumulated should remain
+  EXPECT_EQ(rate.last_delay().count(), 0);
+  EXPECT_EQ(rate.overrun_count(), 1u);             // Count should not increase
+  EXPECT_GT(rate.accumulated_delay().count(), 0);  // But accumulated should remain
 }
 
 // Test reset functionality
@@ -211,13 +211,13 @@ TEST_F(PrecisionUpdateRateTest, ResetClearsStatistics)
   rate.step();
 
   EXPECT_GT(rate.overrun_count(), 0u);
-  EXPECT_GT(rate.accumulated_delay_ns().count(), 0);
+  EXPECT_GT(rate.accumulated_delay().count(), 0);
 
   rate.reset();
 
   EXPECT_EQ(rate.overrun_count(), 0u);
-  EXPECT_EQ(rate.accumulated_delay_ns().count(), 0);
-  EXPECT_EQ(rate.last_delay_ns().count(), 0);
+  EXPECT_EQ(rate.accumulated_delay().count(), 0);
+  EXPECT_EQ(rate.last_delay().count(), 0);
 }
 
 // Test reset and continue functionality
@@ -323,7 +323,7 @@ TEST_F(PrecisionUpdateRateTest, OverrunDetectionAccuracy)
 
   EXPECT_EQ(rate.overrun_count(), 1u);
 
-  auto delay_ms = std::chrono::duration_cast<std::chrono::milliseconds>(rate.last_delay_ns());
+  auto delay_ms = std::chrono::duration_cast<std::chrono::milliseconds>(rate.last_delay());
   EXPECT_GE(delay_ms.count(), 2);  // At least 2ms
   EXPECT_LE(delay_ms.count(), 4);  // At most 4ms (allowing tolerance)
 }
@@ -362,7 +362,7 @@ TEST_F(PrecisionUpdateRateTest, AccumulatedDelayCorrectness)
   for (int i = 0; i < 5; ++i) {
     simulate_work(15ms);
     rate.step();
-    delays.push_back(rate.last_delay_ns());
+    delays.push_back(rate.last_delay());
   }
 
   // Calculate expected accumulated delay
@@ -372,7 +372,7 @@ TEST_F(PrecisionUpdateRateTest, AccumulatedDelayCorrectness)
   }
 
   EXPECT_EQ(rate.overrun_count(), 5u);
-  EXPECT_EQ(rate.accumulated_delay_ns().count(), expected_total);
+  EXPECT_EQ(rate.accumulated_delay().count(), expected_total);
 }
 
 // Stress test: alternating fast and slow execution
@@ -395,5 +395,5 @@ TEST_F(PrecisionUpdateRateTest, AlternatingWorkload)
   }
 
   EXPECT_EQ(rate.overrun_count(), 5u);  // Every other iteration
-  EXPECT_GT(rate.accumulated_delay_ns().count(), 0);
+  EXPECT_GT(rate.accumulated_delay().count(), 0);
 }

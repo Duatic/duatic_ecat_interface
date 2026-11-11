@@ -61,12 +61,12 @@ constexpr std::size_t maximum_visible_string_size = 255;
 // Always available information in an ethercat device
 struct DeviceInfo
 {
-  DeviceId id;
-  std::string name;
-  uint32_t vendor_id;
-  uint32_t product_id;
-  uint32_t revision;
-  bool has_dc;
+  DeviceId id{};
+  std::string name{};
+  uint32_t vendor_id{};
+  uint32_t product_id{};
+  uint32_t revision{};
+  bool has_dc{};
 };
 
 inline std::string to_string(const DeviceInfo& device)
@@ -93,15 +93,15 @@ inline std::ostream& operator<<(std::ostream& os, const DeviceInfo& device)
 // A device the network is configured to have at a given position on the bus
 struct ExpectedDevice
 {
-  DeviceId id;
-  uint32_t vendor_id;
-  uint32_t product_id;
+  DeviceId id{};
+  uint32_t vendor_id{};
+  uint32_t product_id{};
   // Any revision is accepted when not set
   std::optional<uint32_t> revision{};
 };
 
 // Representation of ethercat device states
-enum class EthercatDeviceState
+enum class EthercatDeviceState : uint8_t
 {
   None,
   Init,
@@ -169,6 +169,7 @@ using RegisterReadValue = ValueDiagnosticsWrapper<T, RegisterReadResult>;
 // EEPROM (SII) access types, the EEPROM is addressed in 16 bit words
 using EepromWordAddress = uint16_t;
 
+// Unlike the other results there is no working counter: an eeprom read is a sequence of several register accesses
 struct EepromReadResult
 {
   bool success{ false };
@@ -194,7 +195,7 @@ concept EthercatValueType = std::same_as<T, bool> || std::same_as<T, int8_t> || 
     std::same_as<T, int64_t> || std::same_as<T, uint64_t> || std::same_as<T, float> || std::same_as<T, double>;
 
 template <typename T>
-concept SdoValueType = EthercatValueType<T> || std::same_as<T, std::string>;
+concept SDOValueType = EthercatValueType<T> || std::same_as<T, std::string>;
 
 // Types for mailbox diagnostics
 // These are on purpose located in this file as they are used in the access return values
@@ -273,10 +274,11 @@ struct MailboxEvent
 };
 
 // Types for SDO (ServiceDataObject) interactions
+// The read data is in the buffer passed by the caller, so unlike the register / eeprom results there is no data span
 struct SDOReadResult
 {
   bool success{ false };
-  int actual_size_read{ 0 };
+  std::size_t actual_size_read{ 0 };
   int working_counter{ 0 };
 
   std::optional<MailboxEvent> mailbox_diagnostics{};
@@ -333,7 +335,7 @@ inline std::ostream& operator<<(std::ostream& os, const SDOObjectCode code)
   return os << to_string(code);
 }
 
-// Reprensation of supported data types
+// Representation of supported data types - the enumerators keep the ETG.1000.6 / ETG.1020 data type names
 enum class DataType : uint16_t
 {
   UNKNOWN = 0x0000,
@@ -477,7 +479,7 @@ struct FoEReadResult
 {
   bool success{ false };
   int working_counter{ 0 };
-  std::size_t actual_read_size{ 0 };
+  std::size_t actual_size_read{ 0 };
 
   std::optional<MailboxEvent> mailbox_diagnostics{};
 

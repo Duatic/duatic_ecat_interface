@@ -46,7 +46,7 @@ void print_timing(std::ostream& os, const char* label, const ExecutorTimingDiagn
 
   os << "  " << label << ":\n";
   os << "    last update:       " << t.last_update_tp.time_since_epoch().count() << " ns (monotonic)\n";
-  os << "    last update rate:  " << t.last_update_rate.count() << " us\n";
+  os << "    last period:       " << t.last_update_period.count() << " us\n";
   os << "    last duration:     " << t.last_update_duration.count() << " us\n";
   os << std::fixed << std::setprecision(6);
   os << "    avg update rate:   " << t.average_update_rate << " Hz\n";
@@ -81,18 +81,18 @@ std::string to_string(const DiagnosticsSnapshot& snap)
 
   // Mailbox (cumulative, for the lifetime of the bus)
   os << "\n-- Mailbox --\n";
-  os << "  aborts:      " << snap.mailbox.mailbox_aborts << "\n";
-  os << "  timeouts:    " << snap.mailbox.mailbox_timeouts << "\n";
-  os << "  emergencies: " << snap.mailbox.mailbox_emergencies << "\n";
-  os << "  dropped:     " << snap.mailbox.mailbox_events_dropped << "\n";
+  os << "  aborts:      " << snap.mailbox.aborts << "\n";
+  os << "  timeouts:    " << snap.mailbox.timeouts << "\n";
+  os << "  emergencies: " << snap.mailbox.emergencies << "\n";
+  os << "  dropped:     " << snap.mailbox.events_dropped << "\n";
 
   // Per-slave
   os << "\n-- Slaves (" << snap.slaves.size() << ") --\n";
   for (const auto& s : snap.slaves) {
     os << "  [" << std::setw(2) << s.position << "] " << std::setw(11) << std::left << to_string(s.state) << std::right
        << " | " << (s.online ? "online " : "OFFLINE") << " | " << (s.error_indication ? "ERROR" : "ok   ") << " | AL 0x"
-       << std::setfill('0') << std::setw(4) << std::hex << s.al_status << std::dec << std::setfill(' ') << " ("
-       << to_string(s.al_status) << ")\n";
+       << std::setfill('0') << std::setw(4) << std::hex << s.al_status_code << std::dec << std::setfill(' ') << " ("
+       << al_status_code_to_string(s.al_status_code) << ")\n";
 
     os << "        ports (updated " << s.ports_update_timestamp.time_since_epoch().count() << " ns):\n";
     for (std::size_t p = 0; p < s.ports.size(); ++p) {

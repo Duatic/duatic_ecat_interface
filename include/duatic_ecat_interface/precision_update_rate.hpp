@@ -195,7 +195,7 @@ public:
    * @brief Gets the total accumulated delay from all timing overruns.
    * @return The total accumulated delay as a chrono::nanoseconds duration.
    */
-  std::chrono::nanoseconds accumulated_delay_ns() const
+  std::chrono::nanoseconds accumulated_delay() const
   {
     return std::chrono::nanoseconds(accumulated_delay_ns_);
   }
@@ -204,7 +204,7 @@ public:
    * @brief Gets the delay from the most recent timing overrun.
    * @return The last delay as a chrono::nanoseconds duration (0 if no overrun occurred in last step).
    */
-  std::chrono::nanoseconds last_delay_ns() const
+  std::chrono::nanoseconds last_delay() const
   {
     return std::chrono::nanoseconds(last_delay_ns_);
   }

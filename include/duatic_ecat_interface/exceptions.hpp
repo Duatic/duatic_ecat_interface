@@ -38,17 +38,31 @@
 
 #include "duatic_ecat_interface/backend.hpp"
 
+// Exceptions of this library:
+// - failures of the bus, a device or the executor are reported by the exceptions below, which all derive from
+//   EthercatError (a std::runtime_error)
+// - misuse of the API (e.g. using a device without bus, violated size preconditions) is reported by the
+//   std::logic_error family (std::logic_error, std::invalid_argument)
 namespace duatic::ecat_interface
 {
 /**
- * @brief BackendError - Exception which represents and error which comes for a specific backend
+ * @brief EthercatError - common base of all runtime errors of this library
  */
-class BackendError : public std::runtime_error
+class EthercatError : public std::runtime_error
+{
+public:
+  using std::runtime_error::runtime_error;
+};
+
+/**
+ * @brief BackendError - Exception which represents an error which comes from a specific backend
+ */
+class BackendError : public EthercatError
 {
 public:
   explicit BackendError(const std::string& msg, Backend backend = Backend::Unknown,
                         std::optional<int> ec = std::nullopt)
-    : std::runtime_error(msg), backend_(backend), ec_(ec)
+    : EthercatError(msg), backend_(backend), ec_(ec)
   {
     full_msg_ = "[" + to_string(backend) + "] " + msg;
     if (ec) {
@@ -94,15 +108,15 @@ public:
   }
 };
 
-class DeviceConfigurationError : public std::runtime_error
+class DeviceConfigurationError : public EthercatError
 {
 public:
-  using std::runtime_error::runtime_error;
+  using EthercatError::EthercatError;
 };
 
-class ExecutorError : public std::runtime_error
+class ExecutorError : public EthercatError
 {
 public:
-  using std::runtime_error::runtime_error;
+  using EthercatError::EthercatError;
 };
 }  // namespace duatic::ecat_interface
