@@ -34,7 +34,10 @@
 
 #include <soem_vendor/ethercat.h>
 
+#include <chrono>
 #include <cstdint>
+
+#include "duatic_ecat_interface/ethercat_bus.hpp"
 
 namespace duatic::ecat_interface::internal::soem
 {
@@ -114,5 +117,72 @@ static constexpr EthercatDeviceState map_from_soem_device_state(const ec_state s
     default:
       return EthercatDeviceState::None;
   }
+}
+
+// The timeout of a state transition as defined by the ESI timeout elements (ETG.2000)
+inline std::chrono::milliseconds transition_timeout(const EthercatBus::Parameters& params, const ec_state from,
+                                                    const ec_state to)
+{
+  const auto current = static_cast<ec_state>(from & 0x0F);
+  switch (to & 0x0F) {
+    case ec_state::EC_STATE_PRE_OP:
+      return current == ec_state::EC_STATE_INIT ? params.timeout_transition_preop :
+                                                  params.timeout_transition_back_to_init;
+    case ec_state::EC_STATE_BOOT:
+      return params.timeout_transition_preop;
+    case ec_state::EC_STATE_SAFE_OP:
+      if (current == ec_state::EC_STATE_OPERATIONAL) {
+        return params.timeout_transition_back_to_safeop;
+      }
+      // A disabled SafeOp -> Op timeout falls back to the ETG.2000 default of the SafeopOpTimeout
+      return params.timeout_transition_operational > std::chrono::milliseconds{ 0 } ?
+                 params.timeout_transition_operational :
+                 std::chrono::milliseconds{ 10000 };
+    case ec_state::EC_STATE_OPERATIONAL:
+      return params.timeout_transition_operational;
+    default:
+      return params.timeout_transition_back_to_init;
+  }
+}
+
+// The Error Flag of an AL Status (ETG.1000.6 5.3.2)
+constexpr bool has_error_indication(const uint16_t al_status)
+{
+  return (al_status & EC_STATE_ERROR) != 0;
+}
+
+// Device emulation bit of the 16 bit PDI Control register 0x0140: 0x0141.0 "Copy R1 to R3" (ETG.1000.4 Table 35),
+// set if the ESC emulates the AL Status by copying AL Control (ETG.1000.6 Table 13 "Strict AL Control")
+constexpr uint16_t PDI_CONTROL_DEVICE_EMULATION = 0x0100;
+
+constexpr bool has_device_emulation(const uint16_t pdi_control)
+{
+  return (pdi_control & PDI_CONTROL_DEVICE_EMULATION) != 0;
+}
+
+// The AL Control value requesting a state: while the Error Flag is set a device rejects every request but Init
+// unless it carries the Ack Flag, which then clears the Error Flag (ETG.1000.6 Table 103). Devices with device
+// emulation copy the Ack Flag into the Error Flag instead, so they never get it (ETG.1500 5.3.3)
+constexpr uint16_t al_control_request(const ec_state target_state, const uint16_t al_status,
+                                      const bool device_emulation)
+{
+  return has_error_indication(al_status) && !device_emulation ? static_cast<uint16_t>(target_state | EC_STATE_ACK) :
+                                                                static_cast<uint16_t>(target_state);
+}
+
+// The master shall ignore the AL Status Code while the Error Flag is clear (ETG.1000.6 6.4.1.1)
+constexpr uint16_t valid_al_status_code(const uint16_t al_status, const uint16_t al_status_code)
+{
+  return has_error_indication(al_status) ? al_status_code : 0;
+}
+
+// Time left until the deadline of a transition (ETG.2000: timeouts count from the request), 0 once it has passed
+inline std::chrono::milliseconds remaining(const HighPrecisionClock::time_point deadline,
+                                           const HighPrecisionClock::time_point now = HighPrecisionClock::now())
+{
+  if (deadline <= now) {
+    return std::chrono::milliseconds{ 0 };
+  }
+  return std::chrono::ceil<std::chrono::milliseconds>(deadline - now);
 }
 }  // namespace duatic::ecat_interface::internal::soem
