@@ -270,6 +270,15 @@ struct MailboxEvent
   {
     return kind == MailboxEventKind::Emergency && emergency && !emergency->is_reset();
   }
+
+  /// The device does not have the accessed object or sub-index (CoE abort codes 0x06020000 and 0x06090011).
+  bool is_missing_object() const
+  {
+    constexpr uint32_t object_does_not_exist = 0x06020000;
+    constexpr uint32_t sub_index_does_not_exist = 0x06090011;
+    return protocol == MailboxProtocol::CoE && kind == MailboxEventKind::Abort &&
+           (code == object_does_not_exist || code == sub_index_does_not_exist);
+  }
 };
 
 // Types for SDO (ServiceDataObject) interactions
