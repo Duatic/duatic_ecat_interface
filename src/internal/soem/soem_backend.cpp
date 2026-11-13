@@ -37,6 +37,7 @@
 #include <thread>     // NOLINT(build/include_order)
 #include <atomic>     // NOLINT(build/include_order)
 #include <optional>   // NOLINT(build/include_order)
+#include <sstream>    // NOLINT(build/include_order)
 
 #include <duatic_message_logger/log.hpp>
 
@@ -64,6 +65,17 @@ using namespace internal::soem;  // NOLINT(build/namespaces)
 std::string to_string(const AlStatus& status)
 {
   return std::string(ec_ALstatuscode2string(status));
+}
+
+// Describes a failed mailbox access by the event the device answered with, including its protocol specific code
+std::string describe_failure(const std::optional<MailboxEvent>& event)
+{
+  if (!event) {
+    return "unknown reason";
+  }
+  std::ostringstream description;
+  description << event->description << " (code 0x" << std::hex << event->code << ")";
+  return description.str();
 }
 
 struct EthercatBus::BackendImpl
@@ -151,6 +163,7 @@ struct EthercatBus::BackendImpl
     // ecx_config_init() does not evaluate whether the devices reached Init
     if (!wait_for_device_target_state(0, ec_state::EC_STATE_INIT,
                                       remaining(init_request_tp + params_.timeout_transition_back_to_init))) {
+      log_state_change_failure(0, ec_state::EC_STATE_INIT);
       shutdown();
       throw BackendError("Devices did not reach 'INIT' state - aborting initialization", Backend::SOEM);
     }
@@ -170,6 +183,7 @@ struct EthercatBus::BackendImpl
     const auto preop_deadline = HighPrecisionClock::now() + params_.timeout_transition_preop;
     if (!set_device_target_state(0, ec_state::EC_STATE_PRE_OP) ||
         !wait_for_device_target_state(0, ec_state::EC_STATE_PRE_OP, remaining(preop_deadline))) {
+      log_state_change_failure(0, ec_state::EC_STATE_PRE_OP);
       shutdown();
       throw BackendError("Devices did not reach 'PRE_OP' state - aborting initialization", Backend::SOEM);
     }
@@ -721,7 +735,7 @@ struct EthercatBus::BackendImpl
 
     if (failed) {
       logging::error(logger_) << "Device id " << device_id << ": FoE write of \"" << file_name << "\" failed, wkc "
-                              << wkc << ": " << (event ? event->description : "unknown reason") << std::endl;
+                              << wkc << ": " << describe_failure(event) << std::endl;
     }
 
     return FoEWriteResult{ .success = !failed, .working_counter = wkc, .mailbox_diagnostics = event };
@@ -751,7 +765,7 @@ struct EthercatBus::BackendImpl
 
     if (failed) {
       logging::error(logger_) << "Device id " << device_id << ": FoE read of \"" << file_name << "\" failed, wkc "
-                              << wkc << ": " << (event ? event->description : "unknown reason") << std::endl;
+                              << wkc << ": " << describe_failure(event) << std::endl;
       return FoEReadValue(FoEReadResult{
           .success = false, .working_counter = wkc, .actual_read_size = 0, .mailbox_diagnostics = event });
     }
@@ -829,6 +843,30 @@ struct EthercatBus::BackendImpl
     last_acknowledged_al_status_codes_[device_id] = al_status_code;
     logging::warning(logger_) << "Device " << device_id << " reports the AL error '" << to_string(al_status_code)
                               << "' - acknowledging it";
+  }
+
+  /// Logs why a device (or, for device 0, every device) did not reach a requested state: its state, Error Flag and AL
+  /// Status Code - otherwise a refused transition only shows up as a timeout
+  void log_state_change_failure(const DeviceId device_id, const ec_state target_state)
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    ecx_readstate(&context_.context);
+    const int first = device_id == 0 ? 1 : device_id;
+    const int last = device_id == 0 ? context_.ecatSlavecount_ : device_id;
+    for (int i = first; i <= last; i++) {
+      const auto& device = context_.ecatSlavelist_[i];
+      const auto state = static_cast<ec_state>(device.state & 0x0F);
+      if (state == target_state && !has_error_indication(device.state)) {
+        continue;
+      }
+      auto&& log = logging::error(logger_);
+      log << "Device " << i << " did not reach " << map_from_soem_device_state(target_state) << " (state "
+          << map_from_soem_device_state(state) << (has_error_indication(device.state) ? " + error" : "") << ")";
+      if (const auto code = valid_al_status_code(device.state, device.ALstatuscode); code != 0) {
+        log << ": AL status code 0x" << std::setfill('0') << std::setw(4) << std::hex << code << std::dec << " '"
+            << to_string(code) << "'";
+      }
+    }
   }
 
   bool wait_for_device_target_state(const DeviceId device_id, ec_state target_state,
@@ -928,17 +966,8 @@ struct EthercatBus::BackendImpl
     std::lock_guard<std::mutex> lock(eeprom_mutex_);
     const uint16 configadr = context_.ecatSlavelist_[device_id].configadr;
 
-    // Unlike SOEM never force the eeprom away from the device's firmware
-    if (context_.ecatSlavelist_[device_id].eep_pdi) {
-      uint8 pdi_access = 0;
-      const int wkc =
-          ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPCFG + 1, sizeof(pdi_access), &pdi_access, EC_TIMEOUTRET);
-      if (wkc <= 0 || (pdi_access & 0x01) != 0) {
-        logging::warning(logger_) << "Device id " << device_id
-                                  << ": cannot read the eeprom - the device firmware is accessing it";
-        return EepromReadResult{};
-      }
-    }
+    // Like SOEM, the master forces access away from the device's firmware - devices that emulate their eeprom in
+    // firmware (e.g. on a TI PRU-ICSS ESC) report PDI access permanently
     if (ecx_eeprom2master(&context_.context, device_id) <= 0) {
       logging::error(logger_) << "Device id " << device_id << ": failed to take control of the eeprom";
       return EepromReadResult{};
@@ -1295,6 +1324,9 @@ private:
       return false;
     }
     const auto word = [&sii](std::size_t i) { return static_cast<uint16>(sii[2 * i] | (sii[2 * i + 1] << 8)); };
+    logging::debug(logger_) << "Device id " << device_id << ": bootstrap mailbox from the eeprom - receive 0x"
+                            << std::hex << word(0) << "/" << std::dec << word(1) << ", send 0x" << std::hex << word(2)
+                            << "/" << std::dec << word(3);
     if (word(1) == 0 || word(3) == 0) {
       logging::error(logger_) << "Device id " << device_id << ": the device does not support the bootstrap state";
       return false;
@@ -1305,6 +1337,9 @@ private:
     if (ecx_FPWR(&context_.ecat_port, slave.configadr, ECT_REG_SM0, sizeof(rx), &rx, EC_TIMEOUTRET) <= 0 ||
         ecx_FPWR(&context_.ecat_port, slave.configadr, ECT_REG_SM1, sizeof(tx), &tx, EC_TIMEOUTRET) <= 0) {
       logging::error(logger_) << "Device id " << device_id << ": failed to configure the bootstrap mailbox";
+      return false;
+    }
+    if (!verify_mailbox_sync_managers(device_id, rx, tx)) {
       return false;
     }
     slave.mbx_wo = word(0);
@@ -1329,10 +1364,43 @@ private:
       logging::error(logger_) << "Device id " << device_id << ": failed to restore the standard mailbox";
       return;
     }
+    if (!verify_mailbox_sync_managers(device_id, slave.SM[0], slave.SM[1])) {
+      return;
+    }
     slave.mbx_wo = etohs(slave.SM[0].StartAddr);
     slave.mbx_l = etohs(slave.SM[0].SMlength);
     slave.mbx_ro = etohs(slave.SM[1].StartAddr);
     slave.mbx_rl = etohs(slave.SM[1].SMlength);
+  }
+
+  /// Reads the mailbox SyncManagers back and logs where they differ from what was written. Call with state_mutex_ and
+  /// mailbox_mutex_ held.
+  bool verify_mailbox_sync_managers(const DeviceId device_id, const ec_smt& rx, const ec_smt& tx)
+  {
+    const auto& slave = context_.ecatSlavelist_[device_id];
+    std::array<ec_smt, 2> actual{};
+    if (ecx_FPRD(&context_.ecat_port, slave.configadr, ECT_REG_SM0, sizeof(actual), actual.data(), EC_TIMEOUTRET) <=
+        0) {
+      logging::error(logger_) << "Device id " << device_id << ": failed to read back the mailbox SyncManagers";
+      return false;
+    }
+    // The activate register is the third byte of the flags, its bit 0 enables the SyncManager
+    const auto active = [](const ec_smt& sm) { return ((etohl(sm.SMflags) >> 16) & 0x01) != 0; };
+    bool matches = true;
+    for (std::size_t i = 0; i < actual.size(); i++) {
+      const ec_smt& expected = i == 0 ? rx : tx;
+      if (actual[i].StartAddr == expected.StartAddr && actual[i].SMlength == expected.SMlength &&
+          active(actual[i]) == active(expected)) {
+        continue;
+      }
+      logging::error(logger_) << "Device id " << device_id << ": SM" << i << " is 0x" << std::hex
+                              << etohs(actual[i].StartAddr) << "/" << std::dec << etohs(actual[i].SMlength)
+                              << (active(actual[i]) ? " (active)" : " (inactive)") << " after configuring 0x"
+                              << std::hex << etohs(expected.StartAddr) << "/" << std::dec << etohs(expected.SMlength)
+                              << (active(expected) ? " (active)" : " (inactive)");
+      matches = false;
+    }
+    return matches;
   }
 
   /// Returns the eeprom status once the current command finished, nothing on a timeout
@@ -1356,30 +1424,38 @@ private:
   /// ecx_readeepromFP. Returns the bytes read, 0 on failure. Call with eeprom_mutex_ held.
   std::size_t read_eeprom_chunk(std::span<uint8_t> data, const uint16 configadr, const uint16 word)
   {
+    const auto fail = [this, configadr, word](const char* reason) {
+      logging::warning(logger_) << "Device at 0x" << std::hex << configadr << ": eeprom read of word 0x" << word
+                                << std::dec << " failed - " << reason;
+      return std::size_t{ 0 };
+    };
     auto status = wait_for_eeprom_not_busy(configadr);
     if (!status) {
-      return 0;
+      return fail("the eeprom stayed busy");
     }
     // Clear the error bits of an earlier command
     if ((*status & EC_ESTAT_EMASK) != 0) {
       uint16 nop = htoes(static_cast<uint16>(EC_ECMD_NOP));
       if (ecx_FPWR(&context_.ecat_port, configadr, ECT_REG_EEPCTL, sizeof(nop), &nop, EC_TIMEOUTRET) <= 0) {
-        return 0;
+        return fail("clearing the error bits failed");
       }
     }
     std::array<uint16, 3> command{ htoes(static_cast<uint16>(EC_ECMD_READ)), htoes(word), 0 };
     if (ecx_FPWR(&context_.ecat_port, configadr, ECT_REG_EEPCTL, sizeof(command), command.data(), EC_TIMEOUTRET) <= 0) {
-      return 0;
+      return fail("writing the read command failed");
     }
     status = wait_for_eeprom_not_busy(configadr);
-    if (!status || (*status & EC_ESTAT_NACK) != 0) {
-      return 0;
+    if (!status) {
+      return fail("the read command did not complete");
+    }
+    if ((*status & EC_ESTAT_NACK) != 0) {
+      return fail("the eeprom did not acknowledge the read command");
     }
     std::array<uint8_t, 8> raw{};
     const std::size_t raw_size = (*status & EC_ESTAT_R64) != 0 ? 8 : 4;
     if (ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPDAT, static_cast<uint16>(raw_size), raw.data(),
                  EC_TIMEOUTRET) <= 0) {
-      return 0;
+      return fail("reading the data register failed");
     }
     const std::size_t chunk = std::min(raw_size, data.size());
     std::copy_n(raw.begin(), chunk, data.begin());
@@ -1776,7 +1852,7 @@ bool EthercatBus::change_device_state(const DeviceId device_id, const EthercatDe
 
   const bool success = impl_->wait_for_device_target_state(device_id, soem_state, timeout);
   if (!success) {
-    logging::warning(logger_) << "Device went not into desired target state within timeout" << std::endl;
+    impl_->log_state_change_failure(device_id, soem_state);
   }
   return success;
 }

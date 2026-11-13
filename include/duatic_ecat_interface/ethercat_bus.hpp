@@ -332,7 +332,8 @@ public:
 
   /**
    * @brief read_eeprom_untyped - perform a blocking read of the device's EEPROM (SII), starting at a word address
-   * Fails while the device's firmware accesses the EEPROM. data.size() must be even
+   * Like SOEM, takes EEPROM access from the device's firmware for the read and hands it back afterwards. data.size()
+   * must be even
    * @note thread safe
    */
   EepromReadResult read_eeprom_untyped(std::span<uint8_t> data, const DeviceId device_id,
