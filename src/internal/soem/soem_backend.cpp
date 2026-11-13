@@ -36,6 +36,7 @@
 #include <mutex>      // NOLINT(build/include_order)
 #include <thread>     // NOLINT(build/include_order)
 #include <atomic>     // NOLINT(build/include_order)
+#include <cstring>    // NOLINT(build/include_order)
 #include <optional>   // NOLINT(build/include_order)
 #include <sstream>    // NOLINT(build/include_order)
 
@@ -977,12 +978,28 @@ struct EthercatBus::BackendImpl
     bool success = true;
     while (bytes_read < data.size()) {
       const auto word = static_cast<uint16>(word_address + bytes_read / 2);
-      const std::size_t chunk_read = read_eeprom_chunk(data.subspan(bytes_read), configadr, word);
-      if (chunk_read == 0) {
+      // SOEM's eeprom state machine (busy wait, NACK retries, error clearing). It returns 0 on failure as well, so the
+      // status register tells whether the read succeeded and how many bytes it delivered
+      const uint64 value = ecx_readeepromFP(&context_.context, configadr, word, EC_TIMEOUTEEP);
+      uint16 status = 0;
+      const int wkc = ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPSTAT, sizeof(status), &status, EC_TIMEOUTRET);
+      status = etohs(status);
+      // The checksum / loading error bits describe the eeprom content, not this read
+      const char* failure = wkc <= 0                      ? "the device did not answer" :
+                            (status & EC_ESTAT_BUSY) != 0 ? "the eeprom stayed busy" :
+                            (status & EC_ESTAT_NACK) != 0 ? "the eeprom did not acknowledge the read" :
+                                                            nullptr;
+      if (failure != nullptr) {
+        logging::warning(logger_) << "Device id " << device_id << ": eeprom read of word 0x" << std::hex << word
+                                  << std::dec << " failed - " << failure;
         success = false;
         break;
       }
-      bytes_read += chunk_read;
+      const std::size_t delivered = (status & EC_ESTAT_R64) != 0 ? 8 : 4;
+      const std::size_t chunk = std::min(delivered, data.size() - bytes_read);
+      // The value holds the bytes as read from the device, in eeprom order
+      std::memcpy(data.data() + bytes_read, &value, chunk);
+      bytes_read += chunk;
     }
 
     // Hand the eeprom back to the PDI, where the configuration left it
@@ -1070,8 +1087,6 @@ private:
   std::vector<bool> device_emulation_;
   // EEPROM access
   std::mutex eeprom_mutex_;
-  // Pause between two polls of the eeprom interface, SOEM's EC_LOCALDELAY which it keeps private
-  static constexpr uint32 eeprom_poll_delay_us = 200;
 
   // Backend logger
   logging::Logger logger_;
@@ -1401,65 +1416,6 @@ private:
       matches = false;
     }
     return matches;
-  }
-
-  /// Returns the eeprom status once the current command finished, nothing on a timeout
-  std::optional<uint16> wait_for_eeprom_not_busy(const uint16 configadr)
-  {
-    osal_timert timer;
-    osal_timer_start(&timer, EC_TIMEOUTEEP);
-    do {
-      uint16 status = 0;
-      const int wkc = ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPSTAT, sizeof(status), &status, EC_TIMEOUTRET);
-      status = etohs(status);
-      if (wkc > 0 && (status & EC_ESTAT_BUSY) == 0) {
-        return status;
-      }
-      osal_usleep(eeprom_poll_delay_us);
-    } while (!osal_timer_is_expired(&timer));
-    return std::nullopt;
-  }
-
-  /// Reads the 4 or 8 bytes of one eeprom read command into the front of data, checking every frame unlike
-  /// ecx_readeepromFP. Returns the bytes read, 0 on failure. Call with eeprom_mutex_ held.
-  std::size_t read_eeprom_chunk(std::span<uint8_t> data, const uint16 configadr, const uint16 word)
-  {
-    const auto fail = [this, configadr, word](const char* reason) {
-      logging::warning(logger_) << "Device at 0x" << std::hex << configadr << ": eeprom read of word 0x" << word
-                                << std::dec << " failed - " << reason;
-      return std::size_t{ 0 };
-    };
-    auto status = wait_for_eeprom_not_busy(configadr);
-    if (!status) {
-      return fail("the eeprom stayed busy");
-    }
-    // Clear the error bits of an earlier command
-    if ((*status & EC_ESTAT_EMASK) != 0) {
-      uint16 nop = htoes(static_cast<uint16>(EC_ECMD_NOP));
-      if (ecx_FPWR(&context_.ecat_port, configadr, ECT_REG_EEPCTL, sizeof(nop), &nop, EC_TIMEOUTRET) <= 0) {
-        return fail("clearing the error bits failed");
-      }
-    }
-    std::array<uint16, 3> command{ htoes(static_cast<uint16>(EC_ECMD_READ)), htoes(word), 0 };
-    if (ecx_FPWR(&context_.ecat_port, configadr, ECT_REG_EEPCTL, sizeof(command), command.data(), EC_TIMEOUTRET) <= 0) {
-      return fail("writing the read command failed");
-    }
-    status = wait_for_eeprom_not_busy(configadr);
-    if (!status) {
-      return fail("the read command did not complete");
-    }
-    if ((*status & EC_ESTAT_NACK) != 0) {
-      return fail("the eeprom did not acknowledge the read command");
-    }
-    std::array<uint8_t, 8> raw{};
-    const std::size_t raw_size = (*status & EC_ESTAT_R64) != 0 ? 8 : 4;
-    if (ecx_FPRD(&context_.ecat_port, configadr, ECT_REG_EEPDAT, static_cast<uint16>(raw_size), raw.data(),
-                 EC_TIMEOUTRET) <= 0) {
-      return fail("reading the data register failed");
-    }
-    const std::size_t chunk = std::min(raw_size, data.size());
-    std::copy_n(raw.begin(), chunk, data.begin());
-    return chunk;
   }
 
   bool is_mailbox_polling_enabled() const
