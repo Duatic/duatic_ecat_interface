@@ -65,7 +65,7 @@ public:
     : bus_(bus)
     , params_(params)
     , update_rate_(bus->get_parameters().dc_cycle_time)
-    , logger_(logging::get_logger_with_default_sink("SingleBusExecutor"))
+    , logger_(logging::get_logger("SingleBusExecutor"))
   {
   }
 

@@ -69,7 +69,7 @@ struct EthercatBus::BackendImpl
   explicit BackendImpl(const Parameters& params, EthercatBus* owner)
     : params_(params)
     , owner_(owner)
-    , logger_(logging::get_logger_with_default_sink("SOEM-Backend"))
+    , logger_(logging::get_logger("SOEM-Backend"))
     , dc_sync_(params.dc_cycle_time, params_.master_send_offset)
   {
   }
@@ -316,11 +316,11 @@ struct EthercatBus::BackendImpl
     // Setup distributed clock
     if (!ecx_configdc(&context_.context)) {
       if (params_.dc_enabled) {
-        logger_.error("No devices with DC support found on the bus");
+        logging::error(logger_, "No devices with DC support found on the bus");
         shutdown();
         throw BackendError("No devices wiht DC support found on the bus but DC sync is enabled");
       } else {
-        logger_.info("No devices with DC support found on the bus");
+        logging::info(logger_, "No devices with DC support found on the bus");
       }
     }
     // ecx_configdc() has now measured each slave's DC propagation delay and port linkage
@@ -1163,7 +1163,7 @@ private:
 };
 
 // Pimpl - redirections
-EthercatBus::EthercatBus(const Parameters& params) : logger_(logging::get_logger_with_default_sink("EthercatBus"))
+EthercatBus::EthercatBus(const Parameters& params) : logger_(logging::get_logger("EthercatBus"))
 {
   // NOTE we pass a pointer to ourself on purpose to the backend as this is the best way to
   // dispatch calls to the actual ethercat device classes
