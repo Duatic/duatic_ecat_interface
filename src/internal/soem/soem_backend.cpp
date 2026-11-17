@@ -316,11 +316,11 @@ struct EthercatBus::BackendImpl
     // Setup distributed clock
     if (!ecx_configdc(&context_.context)) {
       if (params_.dc_enabled) {
-        logging::error(logger_, "No devices with DC support found on the bus");
+        logger_.error("No devices with DC support found on the bus");
         shutdown();
         throw BackendError("No devices wiht DC support found on the bus but DC sync is enabled");
       } else {
-        logging::info(logger_, "No devices with DC support found on the bus");
+        logger_.info("No devices with DC support found on the bus");
       }
     }
     // ecx_configdc() has now measured each slave's DC propagation delay and port linkage
