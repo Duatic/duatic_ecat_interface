@@ -65,7 +65,7 @@ public:
     : bus_(bus)
     , params_(params)
     , update_rate_(bus->get_parameters().dc_cycle_time)
-    , logger_(logging::get_logger_with_default_sink("SingleBusExecutor"))
+    , logger_(logging::get_logger("SingleBusExecutor"))
   {
   }
 
@@ -161,7 +161,7 @@ public:
         service_thread_diagnostics_.is_running = false;
       }
 
-      logging::info(logger_) << "Service thread is ending now" << std::endl;
+      logging::info(logger_) << "Service thread is ending now";
     });
   }
 
