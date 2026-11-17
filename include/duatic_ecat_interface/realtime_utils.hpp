@@ -87,7 +87,7 @@ inline bool set_realtime_priority(pthread_t thread, int priority = 60, int cpu_c
 
   if (cpu_core >= number_of_cpus) {
     logging::error() << "Failed to bind thread: " << thread << " to cpu core: " << cpu_core
-                     << ". Please pass a valid cpu core (max: " << number_of_cpus << ")" << std::endl;
+                     << ". Please pass a valid cpu core (max: " << number_of_cpus << ")";
     return false;
   }
 

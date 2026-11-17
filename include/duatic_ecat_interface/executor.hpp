@@ -161,7 +161,7 @@ public:
         service_thread_diagnostics_.is_running = false;
       }
 
-      logging::info(logger_) << "Service thread is ending now" << std::endl;
+      logging::info(logger_) << "Service thread is ending now";
     });
   }
 
