@@ -69,7 +69,7 @@ struct EthercatBus::BackendImpl
   explicit BackendImpl(const Parameters& params, EthercatBus* owner)
     : params_(params)
     , owner_(owner)
-    , logger_(logging::get_logger_with_default_sink("SOEM-Backend"))
+    , logger_(logging::get_logger("SOEM-Backend"))
     , dc_sync_(params.dc_cycle_time, params_.master_send_offset)
   {
   }
@@ -205,7 +205,7 @@ struct EthercatBus::BackendImpl
                               << ") for reading SDO (ID: 0x" << std::setfill('0') << std::setw(4) << std::hex << index
                               << ", SID 0x" << std::setfill('0') << std::setw(2) << std::hex
                               << static_cast<uint16_t>(sub_index)
-                              << "): " << (event ? event->description : "unknown reason") << std::endl;
+                              << "): " << (event ? event->description : "unknown reason");
       return SDOReadResult{
         .success = false, .actual_size_read = actual_size, .working_counter = wkc, .mailbox_diagnostics = event
       };
@@ -216,7 +216,7 @@ struct EthercatBus::BackendImpl
                               << " bytes, read " << actual_size << " bytes) for reading SDO (ID: 0x"
                               << std::setfill('0') << std::setw(4) << std::hex << index << ", SID 0x"
                               << std::setfill('0') << std::setw(2) << std::hex << static_cast<uint16_t>(sub_index)
-                              << ")." << std::endl;
+                              << ").";
       throw BackendError("SDORead size mismatch", Backend::SOEM, actual_size);
     }
     return SDOReadResult{
@@ -258,7 +258,7 @@ struct EthercatBus::BackendImpl
                               << ") for writing SDO (ID: 0x" << std::setfill('0') << std::setw(4) << std::hex << index
                               << ", SID 0x" << std::setfill('0') << std::setw(2) << std::hex
                               << static_cast<uint16_t>(sub_index)
-                              << "): " << (event ? event->description : "unknown reason") << std::endl;
+                              << "): " << (event ? event->description : "unknown reason");
 
       return SDOWriteResult{ .success = false, .working_counter = wkc, .mailbox_diagnostics = event };
     }
@@ -305,7 +305,7 @@ struct EthercatBus::BackendImpl
     io_map_.resize(params_.pdo_buffer_size, 0);
     // And then do the actual configuration
     const int final_iomap_size = ecx_config_map_group(&context_.context, io_map_.data(), 0);
-    logging::info(logger_) << "IOMap size: " << final_iomap_size << std::endl;
+    logging::info(logger_) << "IOMap size: " << final_iomap_size;
 
     if (final_iomap_size > static_cast<int>(params_.pdo_buffer_size)) {
       shutdown();
@@ -422,7 +422,7 @@ struct EthercatBus::BackendImpl
     if (get_bus_state() != BusState::Configured && get_bus_state() != BusState::Activated &&
         get_bus_state() != BusState::Operational) {
       logging::fatal(logger_) << "Invalid BusState in shutdown: " << get_bus_state()
-                              << " - dont know what to do (Critical Error)" << std::endl;
+                              << " - dont know what to do (Critical Error)";
       throw BackendError("Invalid BusState in shutdown - dont know what to do", Backend::SOEM);
     }
     // Bring it into the intermediate ShuttingDown state which is needed to enforce communication
@@ -669,7 +669,7 @@ struct EthercatBus::BackendImpl
 
     if (failed) {
       logging::error(logger_) << "Device id " << device_id << ": FoE write of \"" << file_name << "\" failed, wkc "
-                              << wkc << ": " << (event ? event->description : "unknown reason") << std::endl;
+                              << wkc << ": " << (event ? event->description : "unknown reason");
     }
 
     return FoEWriteResult{ .success = !failed, .working_counter = wkc, .mailbox_diagnostics = event };
@@ -699,7 +699,7 @@ struct EthercatBus::BackendImpl
 
     if (failed) {
       logging::error(logger_) << "Device id " << device_id << ": FoE read of \"" << file_name << "\" failed, wkc "
-                              << wkc << ": " << (event ? event->description : "unknown reason") << std::endl;
+                              << wkc << ": " << (event ? event->description : "unknown reason");
       return FoEReadValue(FoEReadResult{
           .success = false, .working_counter = wkc, .actual_read_size = 0, .mailbox_diagnostics = event });
     }
@@ -888,14 +888,14 @@ private:
     {  // Important to lock after update_write(), otherwise update_write will deadlock
       std::lock_guard<PriorityInheritingMutex> lock(pdo_update_mutex_);
       if (ecx_send_processdata(&context_.context) <= 0) {
-        logging::error(logger_) << "Failed to send process data" << std::endl;
+        logging::error(logger_) << "Failed to send process data";
       }
       wkc = ecx_receive_processdata(&context_.context, EC_TIMEOUTRET);
 
       expected_wkc = context_.context.grouplist[0].outputsWKC * 2 + context_.context.grouplist[0].inputsWKC;
       if (wkc < expected_wkc) {
         logging::warning(logger_) << params_.interface << " Working counter too low (pdo): " << wkc
-                                  << " expected wkc: " << expected_wkc << std::endl;
+                                  << " expected wkc: " << expected_wkc;
       }
       // Run DC clock pi controller to calculate a correction factor which then can be used by executor to shift the
       // update rate
@@ -934,8 +934,7 @@ private:
       // timeout == 0 -> disable timeout
       if (params_.timeout_transition_operational > std::chrono::milliseconds{ 0 } &&
           (HighPrecisionClock::now() - activation_start_tp_.value()) > params_.timeout_transition_operational) {
-        logging::fatal(logger_) << "Failed to put all devices into state 'Operational' within time. Aborting"
-                                << std::endl;
+        logging::fatal(logger_) << "Failed to put all devices into state 'Operational' within time. Aborting";
         shutdown();
         throw BackendError("Could not bring all devices into state 'Operational' within the given timeframe",
                            Backend::SOEM);
@@ -1128,7 +1127,7 @@ private:
 
     auto&& sink = (ev.severity == MailboxEventSeverity::Info) ? logging::info(logger_) : logging::warning(logger_);
     sink << "Mailbox event (device " << ev.device_id << ", " << ev.description << ", code 0x" << std::hex << ev.code
-         << std::dec << ")" << std::endl;
+         << std::dec << ")";
   }
 
   std::pair<std::optional<MailboxEvent>, bool> finish_mailbox_access(const MailboxAccess& acc, const int wkc)
@@ -1163,7 +1162,7 @@ private:
 };
 
 // Pimpl - redirections
-EthercatBus::EthercatBus(const Parameters& params) : logger_(logging::get_logger_with_default_sink("EthercatBus"))
+EthercatBus::EthercatBus(const Parameters& params) : logger_(logging::get_logger("EthercatBus"))
 {
   // NOTE we pass a pointer to ourself on purpose to the backend as this is the best way to
   // dispatch calls to the actual ethercat device classes
@@ -1406,7 +1405,7 @@ bool EthercatBus::change_device_state(const DeviceId device_id, const EthercatDe
   bool res = impl_->set_device_target_state(device_id, soem_state);
   if (!res) {
     logging::warning(logger_) << "Failed to set desired target state (" << target_state << ")"
-                              << "for device: " << device_id << std::endl;
+                              << "for device: " << device_id;
   }
   // Handle the case that the user does not want to block or that the set command failed
   if (!blocking || !res) {
@@ -1415,7 +1414,7 @@ bool EthercatBus::change_device_state(const DeviceId device_id, const EthercatDe
 
   const bool success = impl_->wait_for_device_target_state(device_id, soem_state);
   if (!success) {
-    logging::warning(logger_) << "Device went not into desired target state within timeout" << std::endl;
+    logging::warning(logger_) << "Device went not into desired target state within timeout";
   }
   return success;
 }
