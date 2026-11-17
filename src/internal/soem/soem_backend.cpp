@@ -1127,7 +1127,7 @@ private:
 
     auto&& sink = (ev.severity == MailboxEventSeverity::Info) ? logging::info(logger_) : logging::warning(logger_);
     sink << "Mailbox event (device " << ev.device_id << ", " << ev.description << ", code 0x" << std::hex << ev.code
-         << std::dec << ")" << std::endl;
+         << std::dec << ")";
   }
 
   std::pair<std::optional<MailboxEvent>, bool> finish_mailbox_access(const MailboxAccess& acc, const int wkc)
