@@ -32,12 +32,12 @@
 
 #pragma once
 
-#include <soem_vendor/ethercat.h>
-
-#include <chrono>
-#include <cstdint>
-
 #include "duatic_ecat_interface/ethercat_bus.hpp"
+
+#include <soem_vendor/ethercat.h>  // NOLINT(build/include_order)
+
+#include <chrono>   // NOLINT(build/include_order)
+#include <cstdint>  // NOLINT(build/include_order)
 
 namespace duatic::ecat_interface::internal::soem
 {
