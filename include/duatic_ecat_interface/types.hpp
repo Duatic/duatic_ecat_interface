@@ -90,6 +90,16 @@ inline std::ostream& operator<<(std::ostream& os, const DeviceInfo& device)
   return os << to_string(device);
 }
 
+// A device the network is configured to have at a given position on the bus
+struct ExpectedDevice
+{
+  DeviceId id;
+  uint32_t vendor_id;
+  uint32_t product_id;
+  // Any revision is accepted when not set
+  std::optional<uint32_t> revision{};
+};
+
 // Representation of ethercat device states
 enum class EthercatDeviceState
 {
@@ -155,6 +165,21 @@ struct RegisterReadResult
 
 template <typename T>
 using RegisterReadValue = ValueDiagnosticsWrapper<T, RegisterReadResult>;
+
+// EEPROM (SII) access types, the EEPROM is addressed in 16 bit words
+using EepromWordAddress = uint16_t;
+
+struct EepromReadResult
+{
+  bool success{ false };
+  std::size_t actual_size_read{ 0 };
+  std::span<const uint8_t> data{};
+
+  explicit operator bool() const
+  {
+    return success;
+  }
+};
 
 // CoE types
 using SDOIndex = uint16_t;
@@ -244,6 +269,15 @@ struct MailboxEvent
   bool is_device_fault() const
   {
     return kind == MailboxEventKind::Emergency && emergency && !emergency->is_reset();
+  }
+
+  /// The device does not have the accessed object or sub-index (CoE abort codes 0x06020000 and 0x06090011).
+  bool is_missing_object() const
+  {
+    constexpr uint32_t object_does_not_exist = 0x06020000;
+    constexpr uint32_t sub_index_does_not_exist = 0x06090011;
+    return protocol == MailboxProtocol::CoE && kind == MailboxEventKind::Abort &&
+           (code == object_does_not_exist || code == sub_index_does_not_exist);
   }
 };
 

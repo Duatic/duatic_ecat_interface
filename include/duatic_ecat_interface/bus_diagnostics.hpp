@@ -33,6 +33,7 @@
 
 #include <string>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <vector>
 #include <ostream>
@@ -66,9 +67,12 @@ struct DiagnosticsOptions
 
   // PDO related basic diagnostics such as WKC mismatcheds, lost frames, and total frames sent
   DiagnosticsLevel pdo_diagnostics{ DiagnosticsLevel::Basic };
-  // All mailbox related functions (e.g. SDO...)
+  // Mailbox logging (Basic: emergencies, Tracing: every event) and the polling of the input mailboxes for emergencies
+  // in update_service() - Off disables the polling, unsolicited messages then only arrive during accesses
   // Please note mailbox diagnostics related types are in the "types.hpp" header
   DiagnosticsLevel mailbox_diagnostics{ DiagnosticsLevel::Basic };
+  // How often update_service() polls the input mailboxes, 0 disables the polling
+  std::chrono::milliseconds mailbox_poll_interval{ 100 };
   // Diagnostics related to esc (this is mostly tracking state changes of an esc)
   DiagnosticsLevel esc_diagnostics{ DiagnosticsLevel::Off };
   // Diagnostics related to every port of an esc (very expensive diagnostics)
@@ -158,8 +162,21 @@ struct ESCStatus
 
   // AL Status Code accompanying `state` — explains *why* the slave is in
   // its current state, particularly relevant after a fault or a rejected
-  // state transition request.
+  // state transition request. Only valid while `error_indication` is set,
+  // 0 otherwise (ETG.1000.6: the master shall ignore it then).
   AlStatus al_status{};
+
+  // Error Flag of the AL Status: the slave refused a requested state
+  // transition or left a state on its own due to an error. The master
+  // acknowledges it with the next state change requested for this slave.
+  // Like `state` and `al_status` it is only refreshed after activation
+  // while the ESC diagnostics are enabled.
+  bool error_indication = false;
+
+  // True if the slave's ESC emulates the AL Status (simple slave without
+  // application controller, read once from the PDI Control register at
+  // initialization). Errors of such slaves are not acknowledged.
+  bool device_emulation = false;
 
   // True if the master is currently receiving valid responses from this
   // slave (i.e. it responded and contributed to the working counter on
@@ -215,12 +232,14 @@ struct BusStatus
 
 // Cumulative mailbox event counters (CoE/FoE/SoE aborts, timeouts, emergencies), accumulated for
 // the entire lifetime of the owning EthercatBus instance (same never-reset semantics as
-// BusStatus's counters above).
+// BusStatus's counters above). Every event is counted, independent of the mailbox_diagnostics level.
 struct MailboxStatus
 {
   uint64_t mailbox_aborts = 0;
   uint64_t mailbox_timeouts = 0;
   uint64_t mailbox_emergencies = 0;
+  // Events dropped from the full EthercatBus::pop_mailbox_events() queue
+  uint64_t mailbox_events_dropped = 0;
 };
 
 struct ExecutorTimingDiagnostics
