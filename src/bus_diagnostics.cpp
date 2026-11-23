@@ -84,13 +84,15 @@ std::string to_string(const DiagnosticsSnapshot& snap)
   os << "  aborts:      " << snap.mailbox.mailbox_aborts << "\n";
   os << "  timeouts:    " << snap.mailbox.mailbox_timeouts << "\n";
   os << "  emergencies: " << snap.mailbox.mailbox_emergencies << "\n";
+  os << "  dropped:     " << snap.mailbox.mailbox_events_dropped << "\n";
 
   // Per-slave
   os << "\n-- Slaves (" << snap.slaves.size() << ") --\n";
   for (const auto& s : snap.slaves) {
     os << "  [" << std::setw(2) << s.position << "] " << std::setw(11) << std::left << to_string(s.state) << std::right
-       << " | " << (s.online ? "online " : "OFFLINE") << " | AL 0x" << std::setfill('0') << std::setw(4) << std::hex
-       << s.al_status << std::dec << std::setfill(' ') << " (" << to_string(s.al_status) << ")\n";
+       << " | " << (s.online ? "online " : "OFFLINE") << " | " << (s.error_indication ? "ERROR" : "ok   ") << " | AL 0x"
+       << std::setfill('0') << std::setw(4) << std::hex << s.al_status << std::dec << std::setfill(' ') << " ("
+       << to_string(s.al_status) << ")\n";
 
     os << "        ports (updated " << s.ports_update_timestamp.time_since_epoch().count() << " ns):\n";
     for (std::size_t p = 0; p < s.ports.size(); ++p) {
